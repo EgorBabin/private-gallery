@@ -7,7 +7,11 @@ export default function Login() {
     return (
         <div className={styles.div}>
             <Link to="/google" className={styles.google}>Google</Link>
-            <Link to="/yandex" className={styles.yandex}>Yandex</Link>
+            <a href="http://localhost:3000/api/auth/yandex" className={styles.yandex}>Yandex</a>
+
+            <a href="http://localhost:3000/api/auth/yandex">
+                <button>Войти через Яндекс</button>
+            </a>
         </div>
     )
 }

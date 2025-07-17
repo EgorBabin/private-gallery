@@ -14,6 +14,7 @@ express-session
 cors
 dotenv
 pg
+express-useragent
 
 ### frontend
 react-router-dom

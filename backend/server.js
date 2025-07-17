@@ -3,6 +3,8 @@ import express from 'express'
 import session from 'express-session'
 import cors from 'cors' // for local use
 import usersRoutes from './routes/users.js'
+import yandexRoutes from './routes/yandex.js'
+import useragent from 'express-useragent'
 
 const app = express()
 const PORT = 3000
@@ -22,6 +24,8 @@ app.use(session({
   cookie: { secure: false } // for local use - сменить на true
 }))
 
+app.use(useragent.express())
+
 // check work
 app.get('/api/hello', (req, res) => {
     res.json({ message: 'Hello from backend!' })
@@ -29,6 +33,7 @@ app.get('/api/hello', (req, res) => {
 
 // Подключаем роуты
 app.use('/api/users', usersRoutes)
+app.use('/api', yandexRoutes)
 
 app.use((err, req, res, next) => {
     console.error(err.stack)
