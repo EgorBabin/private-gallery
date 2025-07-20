@@ -1,0 +1,15 @@
+* {
+    margin: 1%;
+}
+
+a {
+    color: white;
+}
+
+a.google {
+    background-color: cadetblue;
+}
+
+a.yandex {
+    background-color: brown;
+}

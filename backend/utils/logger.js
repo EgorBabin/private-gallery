@@ -64,6 +64,17 @@ export async function logAction(req, action, extra = {}) {
         if (err) console.error('Ошибка записи лога:', err)
     })
 
-    const tgMessage = `<b>${action}</b>\n🕒 ${timestamp}\n🌍 IP: ${ip}\n📱 Устройство: ${device}\n✉️ Email: ${email}\n🔐 Авторизация: ${authType}\n🔗 URL: ${method} ${url}${extraData ? `\n📎 ${extraData}` : ''}`
+    const lines = [
+        `<b>${action}</b>`,
+        `<b>Email:</b> ${email}`,
+        `<b>Device:</b> ${device}`,
+        `<b>Time:</b> ${timestamp}`,
+        `<b>IP:</b> ${ip}`,
+        `<b>URL:</b> ${method} ${url}`,
+        `<b>${authType}</b>`,
+        `${extraData ? `📎 ${extraData}` : ''}`
+    ]
+
+    const tgMessage = lines.join('\n');
     await sendToTelegram(tgMessage)
 }

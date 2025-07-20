@@ -2,9 +2,12 @@ import 'dotenv/config'
 import express from 'express'
 import session from 'express-session'
 import cors from 'cors' // for local use
+import useragent from 'express-useragent'
+
 import usersRoutes from './routes/users.js'
 import yandexRoutes from './routes/yandex.js'
-import useragent from 'express-useragent'
+import authCheck from './utils/authCheck.js';
+import { logAction } from './utils/logger.js'
 
 const app = express()
 const PORT = 3000
@@ -21,19 +24,52 @@ app.use(session({
     secret: process.env.SESSION_SECRET,
     resave: false,
     saveUninitialized: false,
-  cookie: { secure: false } // for local use - сменить на true
+    rolling: true,
+    // for local use
+    // cookie: { 
+    //     httpOnly: true,
+    //     secure: true,
+    //     sameSite: 'lax'
+    // }
 }))
+
+// 🔒 Middleware проверки IP/UA
+app.use(async (req, res, next) => {
+    if (req.session.user) {
+        const currentIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
+        const currentUA = req.headers['user-agent'];
+
+        const storedIp = req.session.ip;
+        const storedUA = req.session.ua;
+
+        if (!storedIp || !storedUA) {
+            req.session.ip = currentIp;
+            req.session.ua = currentUA;
+        } else if (storedIp !== currentIp || storedUA !== currentUA) {
+            await logAction(req, '⚠️ Подозрительная активность: IP или UA изменены', 'server.js' )
+            console.warn('⚠️ Подозрительная активность: IP или UA изменены');
+            req.session.destroy(() => {
+                res.clearCookie('connect.sid');
+                return res.status(401).json({ error: 'Сессия недействительна' });
+            });
+            return;
+        }
+    }
+    next();
+});
 
 app.use(useragent.express())
 
 // check work
-app.get('/api/hello', (req, res) => {
+app.get('/api/hello', async (req, res) => {
     res.json({ message: 'Hello from backend!' })
+    await logAction(req, '👋 API Hello')
 })
 
 // Подключаем роуты
 app.use('/api/users', usersRoutes)
-app.use('/api', yandexRoutes)
+app.use('/', yandexRoutes)
+app.use(authCheck);
 
 app.use((err, req, res, next) => {
     console.error(err.stack)

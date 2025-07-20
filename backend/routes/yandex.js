@@ -4,20 +4,35 @@ import { logAction } from '../utils/logger.js'
 
 const router = express.Router()
 
-router.get('/auth/yandex', async (req, res) => {
-    await logAction(req, 'Яндекс');
+router.get('/yandex', async (req, res) => {
+    if (req.session.user) {
+        return res.redirect('http://localhost:5173')
+    }
+
+    await logAction(req, '👁️‍🗨️ Yandex');
+    const remember = req.query.remember === '1' ? '1' : '0'
     const redirectUri = 'https://oauth.yandex.ru/authorize' +
         `?response_type=code` +
         `&client_id=${process.env.YANDEX_CLIENT_ID}` +
-        `&redirect_uri=${process.env.YANDEX_REDIRECT_URI}` +
+        `&redirect_uri=${encodeURIComponent(process.env.YANDEX_REDIRECT_URI + '?remember=' + remember)}` +
         `&scope=login:email`;
 
     res.redirect(redirectUri);
 });
 
-router.get('/auth/yandex/callback', async (req, res) => {
-    await logAction(req, 'Получение данных', 'Yandex');
-    const { code } = req.query;
+router.get('/yandex/callback', async (req, res) => {
+    if (req.session.user) {
+        return res.redirect('http://localhost:5173')
+    }
+
+    const { code, remember } = req.query;
+    if (!code) {
+        await logAction(req, '⚠️ Нет кода авторизации в callback', 'Yandex');
+        return res.redirect('http://localhost:5173'); // или показать ошибку
+    }
+
+    await logAction(req, '📥 Получение данных', 'Yandex');
+
     try {
     const tokenRes = await fetch('https://oauth.yandex.ru/token', {
         method: 'POST',
@@ -50,18 +65,33 @@ router.get('/auth/yandex/callback', async (req, res) => {
     const { rows } = await pool.query(userQuery, [email]);
 
     if (rows.length === 0) {
-        await logAction(req, 'Пользователь не найден', 'Yandex');
-        return res.status(401).json({ error: 'Пользователь не найден' });
+        await logAction(req, '❌ Пользователь не найден', email );
+        return res.status(401).json({ error: 'Пользователь не найден ', email });
     }
 
     // Сессия
-    req.session.user = { id: rows[0].id, username: rows[0].username };
-    await logAction(req, 'Пользователь авторизовался', 'Yandex')
+    req.session.user = { 
+        id: rows[0].id, 
+        username: rows[0].username,
+        email: email,
+        authType: 'yandex'
+    };
+
+    if (remember === '1') {
+        req.session.cookie.maxAge = 1000 * 60 * 60 * 24 * 30 // 30 дней
+    } else {
+        req.session.cookie.expires = false // пока не закроет браузер
+    }
+
+    req.session.ip = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
+    req.session.ua = req.headers['user-agent'];
+
+    await logAction(req, '✅ Пользователь авторизовался')
     res.redirect('http://localhost:5173'); // на фронт
 
     } catch (err) {
         console.error(err);
-        await logAction(req, 'Ошибка авторизации через Яндекс')
+        await logAction(req, '❌ Ошибка авторизации через Яндекс')
         res.status(500).json({ error: 'Ошибка авторизации через Яндекс' });
     }
 });

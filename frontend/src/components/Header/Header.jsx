@@ -7,7 +7,7 @@ export default function Header() {
     return (
         <header className={styles.header}>
             <nav className={styles.nav}>
-                <Link to="/"><img src={icon} /></Link>
+                <Link to="/"><img src={icon} alt='favicon' /></Link>
                 <Link to="/login">Войти</Link>
                 <Link to="/users">Пользователи</Link>
             </nav>
