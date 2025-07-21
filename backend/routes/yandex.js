@@ -69,25 +69,31 @@ router.get('/yandex/callback', async (req, res) => {
         return res.status(401).json({ error: 'Пользователь не найден ', email });
     }
 
-    // Сессия
-    req.session.user = { 
-        id: rows[0].id, 
-        username: rows[0].username,
-        email: email,
-        authType: 'yandex'
-    };
+    req.session.regenerate(err => {
+        if (err) {
+            console.error('Ошибка сессии:', err);
+            return res.status(500).json({ error: 'Session error' });
+        }
 
-    if (remember === '1') {
-        req.session.cookie.maxAge = 1000 * 60 * 60 * 24 * 30 // 30 дней
-    } else {
-        req.session.cookie.expires = false // пока не закроет браузер
-    }
+        req.session.user = {
+            id: rows[0].id,
+            username: rows[0].username,
+            email: email,
+            authType: 'yandex'
+        };
+        req.session.ip = req.headers['x-forwarded-for']?.split(',')[0] || req.socket.remoteAddress;
+        req.session.ua = req.headers['user-agent'];
 
-    req.session.ip = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
-    req.session.ua = req.headers['user-agent'];
+        if (remember === '1') {
+            req.session.cookie.maxAge = 1000 * 60 * 60 * 24 * 30;
+        } else {
+            req.session.cookie.expires = false;
+        }
 
-    await logAction(req, '✅ Пользователь авторизовался')
-    res.redirect('http://localhost:5173'); // на фронт
+        logAction(req, '✅ Пользователь авторизовался');
+        res.redirect('http://localhost:5173');
+        return;
+    });
 
     } catch (err) {
         console.error(err);

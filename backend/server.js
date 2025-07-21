@@ -4,6 +4,7 @@ import session from 'express-session'
 import cors from 'cors' // for local use
 import useragent from 'express-useragent'
 
+import checkWork from './routes/hello.js'
 import usersRoutes from './routes/users.js'
 import yandexRoutes from './routes/yandex.js'
 import authCheck from './utils/authCheck.js';
@@ -25,16 +26,18 @@ app.use(session({
     resave: false,
     saveUninitialized: false,
     rolling: true,
-    // for local use
-    // cookie: { 
-    //     httpOnly: true,
-    //     secure: true,
-    //     sameSite: 'lax'
-    // }
+    cookie: {
+        httpOnly: true,          
+        secure: false, // в проде — true // for local use
+        sameSite: 'lax',
+        maxAge: 1000 * 60 * 30 // 30 минут по умолчанию
+    }
 }))
 
+app.use(useragent.express())
 // 🔒 Middleware проверки IP/UA
 app.use(async (req, res, next) => {
+    console.log('Сессия:', req.session);
     if (req.session.user) {
         const currentIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
         const currentUA = req.headers['user-agent'];
@@ -60,13 +63,8 @@ app.use(async (req, res, next) => {
 
 app.use(useragent.express())
 
-// check work
-app.get('/api/hello', async (req, res) => {
-    res.json({ message: 'Hello from backend!' })
-    await logAction(req, '👋 API Hello')
-})
-
 // Подключаем роуты
+app.use(checkWork)
 app.use('/api/users', usersRoutes)
 app.use('/', yandexRoutes)
 app.use(authCheck);
