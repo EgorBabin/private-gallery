@@ -1,6 +1,8 @@
 import 'dotenv/config'
 import express from 'express'
 import session from 'express-session'
+import pgSession from 'connect-pg-simple'
+import pool from './db.js'
 import cors from 'cors' // for local use
 import useragent from 'express-useragent'
 
@@ -21,9 +23,16 @@ app.use(cors({
 // // for local use
 
 app.use(express.json())
+
+const PgSession = pgSession(session)
 app.use(session({
+    store: new PgSession({
+        pool,
+        tableName: 'session',
+        createTableIfMissing: true,
+    }),
     secret: process.env.SESSION_SECRET,
-    resave: false,
+    resave: true,
     saveUninitialized: false,
     rolling: true,
     cookie: {
@@ -60,8 +69,6 @@ app.use(async (req, res, next) => {
     }
     next();
 });
-
-app.use(useragent.express())
 
 // Подключаем роуты
 app.use(checkWork)

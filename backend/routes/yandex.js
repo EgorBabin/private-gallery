@@ -28,7 +28,7 @@ router.get('/yandex/callback', async (req, res) => {
     const { code, remember } = req.query;
     if (!code) {
         await logAction(req, '⚠️ Нет кода авторизации в callback', 'Yandex');
-        return res.redirect('http://localhost:5173'); // или показать ошибку
+        return res.redirect('http://localhost:5173');
     }
 
     await logAction(req, '📥 Получение данных', 'Yandex');
