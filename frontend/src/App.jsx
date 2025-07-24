@@ -12,24 +12,30 @@ import Footer from '@/components/Footer/Footer'
 function App() {
   return (
     <BrowserRouter>
-      <p>Lorem ipsum dolor sit amet, consectetur adipisicing elit. Est quidem ut, atque iste velit qui placeat obcaecati possimus ullam nostrum harum unde consequuntur laboriosam modi repellat beatae. Sunt, debitis architecto.
-        Lorem ipsum, dolor sit amet consectetur adipisicing elit. Nam placeat natus aut ad eaque, facilis minus. Veniam voluptatem numquam ipsa autem, dolore dolorum, quod odit voluptatum, debitis temporibus quasi laboriosam.
-        Lorem, ipsum dolor sit amet consectetur adipisicing elit. Quidem, ex enim odit quam, porro voluptate vel nulla accusamus deleniti veritatis perspiciatis nisi minus libero voluptas vitae. Eius ea deserunt a.
-        Lorem ipsum dolor sit amet consectetur adipisicing elit. Commodi a reiciendis veritatis consequatur veniam? Placeat reiciendis in iste rerum natus error, excepturi velit doloribus commodi accusantium corrupti sint quae nisi.
-        Lorem ipsum dolor sit amet consectetur adipisicing elit. Facere exercitationem sed, aliquam repellendus, doloremque maxime eveniet, quo cum laudantium cumque ut. Porro aut quasi consequuntur, exercitationem laudantium corrupti delectus deserunt.
-        Lorem ipsum dolor sit amet consectetur adipisicing elit. Totam maxime minus aut iste voluptatibus dolore sequi quam. Veritatis voluptate labore doloribus ullam dicta illo impedit at, suscipit excepturi amet dolores!
-        Lorem ipsum dolor sit amet consectetur, adipisicing elit. Accusantium nisi amet minus voluptatem optio esse rem! Maxime quos laborum blanditiis culpa, fugit minima cupiditate, at obcaecati eum nobis sed itaque?
-        Lorem ipsum dolor sit amet consectetur adipisicing elit. Eligendi vel praesentium perferendis natus culpa at voluptate. Ut debitis molestiae sapiente aspernatur, incidunt officia impedit? Voluptatibus vitae perspiciatis consequuntur cumque temporibus.
-      </p>
+
       <Header />
 
-      <Routes>
-        <Route path="/" element={<Home />} />
-        <Route path="/users" element={<Users />} />
-        <Route path="/login" element={<Login />} />
-        <Route path="/auth" element={<Login />} />
-        <Route path="*" element={<NotFound />} />
-      </Routes>
+        <Routes>
+          <Route path="/" element={<Home />} />
+          <Route path="/users" element={<Users />} />
+          <Route path="/login" element={<Login />} />
+          <Route path="/auth" element={<Login />} />
+          <Route path="*" element={<NotFound />} />
+        </Routes>
+
+      <p>
+        Lorem ipsum dolor sit amet, consectetur adipisicing elit. Fugiat fuga sapiente esse consectetur. Quia, necessitatibus. Culpa fugiat corrupti doloribus, rem voluptate distinctio ab necessitatibus omnis, assumenda deleniti perspiciatis, atque dolores?
+        Lorem ipsum dolor sit amet consectetur adipisicing elit. Aperiam reprehenderit impedit laboriosam unde fugiat exercitationem tempore consequatur accusamus libero ad maxime quidem, asperiores labore itaque nihil deserunt quibusdam minima nulla.
+        Lorem ipsum dolor sit, amet consectetur adipisicing elit. Corporis repudiandae laudantium quod delectus. Ea cum ex fugit praesentium nemo. Doloribus, unde. Mollitia aliquam nesciunt magnam libero aspernatur! Exercitationem, laboriosam repellat?
+        Lorem ipsum dolor sit amet, consectetur adipisicing elit. Suscipit minima ad placeat laudantium voluptatum possimus, maxime ut non nihil, voluptas facere deserunt. Repellat possimus omnis molestiae praesentium eos odit optio?
+        Lorem, ipsum dolor sit amet consectetur adipisicing elit. Doloremque vero aliquid deleniti quas quibusdam in, animi, provident, dolor eveniet quis vitae facere asperiores iste fuga ratione illum! Modi, tempore perferendis.
+        Lorem ipsum dolor sit amet, consectetur adipisicing elit. Rem dolore rerum porro aliquid cumque ducimus vero laudantium suscipit ullam, labore saepe id delectus iure officia, veritatis est libero enim odio!
+        Lorem ipsum, dolor sit amet consectetur adipisicing elit. Culpa magni quia veniam labore voluptatibus soluta voluptatum eaque deserunt aliquid, debitis repudiandae quisquam molestiae mollitia optio nisi, accusantium pariatur sit quo.
+        Lorem ipsum dolor sit amet consectetur adipisicing elit. Vel perferendis architecto molestias fuga sapiente amet quo rem velit libero cupiditate id doloremque deserunt ipsum sed consequuntur, voluptatum consectetur et praesentium?
+        Lorem ipsum dolor sit amet consectetur, adipisicing elit. Et consequatur modi consequuntur corrupti dolor deserunt sequi provident corporis? Reprehenderit dolorem illum alias quasi est voluptas inventore tempora neque enim natus.
+        Lorem ipsum dolor sit amet consectetur adipisicing elit. Sunt, vel tempore nostrum quas temporibus ea tempora eveniet adipisci voluptates reiciendis atque officiis mollitia quae dolore, sequi magnam nisi illo labore?
+        Lorem ipsum, dolor sit amet consectetur adipisicing elit. Magnam, enim repellendus. Aperiam rem sed in atque veniam eum fuga eius nihil ea, voluptatem quae obcaecati adipisci velit eveniet aliquid porro?
+      </p>
 
       <Footer />
 

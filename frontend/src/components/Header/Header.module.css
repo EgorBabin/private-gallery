@@ -1,5 +1,18 @@
+.header {
+    z-index: 50;
+
+    position: fixed;
+    text-align: center;
+    left: 0;
+    bottom: 0;
+    width: 100dvw;
+}
+
 .nav { 
     display: flex; 
-    gap: 15px;
-    margin-bottom: 20px;
+    justify-content: center;
+    align-items: center;
+    width: clamp(120px, 70vh, 300px);
+    border-radius: 50px;
+    background-color: blueviolet;
 }
