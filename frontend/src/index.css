@@ -12,6 +12,7 @@
 
 :root {
   font-family: system-ui, Arial, sans-serif;
+  font-size: 2rem;
   line-height: 1.5;
   font-weight: 400;
 
@@ -25,21 +26,9 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
-html {
-  scroll-behavior: smooth;
-}
-
-body {
-  margin: 0;
-  display: flex;
-  place-items: center;
-  min-width: 320px;
-  min-height: 100vh;
-}
-
 @media (prefers-color-scheme: light) {
   :root {
-    color: #213547;
+    color: #000000;
     background-color: #ffffff;
   }
   a:hover {
@@ -50,8 +39,26 @@ body {
   }
 }
 
+html {
+  scroll-behavior: smooth;
+  max-width: 100%;
+}
+
+body {
+  background-image: url(pic.jpg);
+  min-height: 1000dvh;
+  width: 100%;
+}
+
 .app-container {
   display: flex;
-  flex-direction: column;
-  min-height: 100%;
+  min-height: 100dvh;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  hyphens: auto;
+  font-size: clamp(1.5rem, 5vw, 2.5rem);
+  max-width: 100%;
 }

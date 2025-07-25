@@ -10,15 +10,12 @@ export default function Header() {
                 <Link to="/">
                     <Film  strokeWidth={2} />
                 </Link>
-                
                 <Link to="/">
                     <LayoutDashboard />
                 </Link>
-
                 <Link to="/login">
                     <LogIn />
                 </Link>
-
                 <Link to="/users">
                     <Users />
                 </Link>
