@@ -1,11 +1,11 @@
 a {
-    color: white;
+    color: var(--color-text-primary);
 }
 
 a.google {
-    background-color: cadetblue;
+    background-color: var(--color-login-btn-google);
 }
 
 a.yandex {
-    background-color: brown;
+    background-color: var(--color-login-btn-yandex);
 }

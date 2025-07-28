@@ -11,8 +11,8 @@ export default function Login() {
     
     const [remember, setRemember] = useState(false)
 
-    const yandexHref = `http://localhost:3000/yandex${remember ? '?remember=1' : ''}`
-    const googleHref = `http://localhost:3000/google${remember ? '?remember=1' : ''}`
+    const yandexHref = `/api/yandex${remember ? '?remember=1' : ''}`
+    const googleHref = `/api/google${remember ? '?remember=1' : ''}`
 
     const navigate = useNavigate();
 

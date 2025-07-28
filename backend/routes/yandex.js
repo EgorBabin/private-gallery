@@ -4,9 +4,9 @@ import { logAction } from '../utils/logger.js'
 
 const router = express.Router()
 
-router.get('/yandex', async (req, res) => {
+router.get('/', async (req, res) => {
     if (req.session.user) {
-        return res.redirect('http://localhost:5173')
+        return res.redirect(process.env.FRONTEND_URL)
     }
 
     await logAction(req, '👁️‍🗨️ Yandex');
@@ -20,15 +20,15 @@ router.get('/yandex', async (req, res) => {
     res.redirect(redirectUri);
 });
 
-router.get('/yandex/callback', async (req, res) => {
+router.get('/callback', async (req, res) => {
     if (req.session.user) {
-        return res.redirect('http://localhost:5173')
+        return res.redirect(process.env.FRONTEND_URL)
     }
 
     const { code, remember } = req.query;
     if (!code) {
         await logAction(req, '⚠️ Нет кода авторизации в callback', 'Yandex');
-        return res.redirect('http://localhost:5173');
+        return res.redirect(process.env.FRONTEND_URL);
     }
 
     await logAction(req, '📥 Получение данных', 'Yandex');
@@ -91,7 +91,7 @@ router.get('/yandex/callback', async (req, res) => {
         }
 
         logAction(req, '✅ Пользователь авторизовался');
-        res.redirect('http://localhost:5173');
+        res.redirect(process.env.FRONTEND_URL);
         return;
     });
 

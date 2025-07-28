@@ -1,5 +1,9 @@
 .env
 
+# SSL
+cert.pem
+key.pem
+
 # FRONTEND
 # background
 pic.jpg

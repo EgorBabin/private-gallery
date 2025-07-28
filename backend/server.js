@@ -1,6 +1,10 @@
 import 'dotenv/config'
 import express from 'express'
 import session from 'express-session'
+
+import https from 'https';
+import fs from 'fs';
+
 import pgSession from 'connect-pg-simple'
 import pool from './db.js'
 import cors from 'cors' // for local use
@@ -13,11 +17,15 @@ import authCheck from './utils/authCheck.js';
 import { logAction } from './utils/logger.js'
 
 const app = express()
-const PORT = 3000
+
+const httpsServer = https.createServer({
+    key: fs.readFileSync('../SSL/key.pem'),
+    cert: fs.readFileSync('../SSL/cert.pem'),
+}, app);
 
 // for local use
 app.use(cors({
-    origin: 'http://localhost:5173', // фронт
+    origin: process.env.FRONTEND_URL, // фронт
     credentials: true // чтобы работали cookies
 }))
 // // for local use
@@ -37,7 +45,7 @@ app.use(session({
     rolling: true,
     cookie: {
         httpOnly: true,          
-        secure: false, // в проде — true // for local use
+        secure: true, // в проде — true // for local use
         sameSite: 'lax',
         maxAge: 1000 * 60 * 30 // 30 минут по умолчанию
     }
@@ -71,14 +79,16 @@ app.use(async (req, res, next) => {
 });
 
 // Подключаем роуты
-app.use(checkWork)
-app.use('/api/users', usersRoutes)
-app.use('/', yandexRoutes)
-app.use(authCheck);
+app.use('/api/', checkWork)
+app.use('/api/users/', usersRoutes)
+app.use('/api/yandex/', yandexRoutes)
+app.use('/api/check-session/', authCheck);
 
 app.use((err, req, res, next) => {
     console.error(err.stack)
     res.status(500).json({ error: 'Internal Server Error' })
 })
 
-app.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`))
+httpsServer.listen(3000, () => {
+    console.log('HTTPS сервер запущен на https://localhost:3000');
+});

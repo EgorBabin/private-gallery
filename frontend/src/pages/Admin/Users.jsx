@@ -14,7 +14,7 @@ export default function UsersPage() {
         setLoading(true)
         setError(null)
         try {
-            const res = await fetch('http://localhost:3000/api/users')
+            const res = await fetch('/api/users')
             if (!res.ok) throw new Error('Ошибка загрузки')
             const data = await res.json()
             setUsers(data)
@@ -38,7 +38,7 @@ export default function UsersPage() {
         e.preventDefault()
         setError(null)
         try {
-            const res = await fetch('http://localhost:3000/api/users', {
+            const res = await fetch('/api/users', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(form),
@@ -61,7 +61,7 @@ export default function UsersPage() {
     async function handleDelete(id) {
         if (!window.confirm('Удалить пользователя?')) return
         try {
-            const res = await fetch(`http://localhost:3000/api/users/${id}`, {
+            const res = await fetch(`/api/users/${id}`, {
                 method: 'DELETE',
             })
             if (!res.ok) throw new Error('Ошибка удаления')
@@ -74,7 +74,7 @@ export default function UsersPage() {
     // Обновление пользователя (например, изменить роль)
     async function handleUpdate(id, updatedFields) {
         try {
-            const res = await fetch(`http://localhost:3000/api/users/${id}`, {
+            const res = await fetch(`/api/users/${id}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(updatedFields),

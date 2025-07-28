@@ -5,7 +5,6 @@
     bottom: 0;
     margin-top: auto;
     padding: 20px;
-    background-color: #20232a;
-    color: #ffffff;
+    background-color: var(--color-background-surface);
     text-align: center;
 }

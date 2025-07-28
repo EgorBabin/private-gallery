@@ -15,9 +15,9 @@
     width: clamp(120px, 70%, 300px);
     border-radius: 0.7rem;
 
-    background-color: rgba(0, 0, 0, 0.65);
+    background-color: var(--color-header-bg);
     border: 2px solid transparent;
-    box-shadow: 0 10px 32px rgba(0, 0, 0, 0.6);
+    box-shadow: 0 10px 32px var(--color-header-bg);
 
     @supports (backdrop-filter: url(#frosted)) {
         backdrop-filter: url(#frosted);
@@ -47,7 +47,7 @@ header svg {
     display: inline-block;
     width: 1px;
     height: 1cap;
-    background-color: #8b8b8b;
+    background-color: var(--color-header-bg-stick);
     position: absolute;
     right: 0;
     top: 50%;
