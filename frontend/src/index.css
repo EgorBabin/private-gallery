@@ -46,13 +46,19 @@ html {
 
 body {
   background-image: url(pic.jpg);
-  min-height: 1000dvh;
+  min-height: 10000dvh;
   width: 100%;
 }
 
 .app-container {
   display: flex;
   min-height: 100dvh;
+}
+
+svg {
+  color: white;
+  height: 1cap;
+  width: 1cap;
 }
 
 h1, h2, h3, h4, h5, h6 {
