@@ -1,13 +1,22 @@
 import { useEffect, useState } from 'react'
 import styles from './Users.module.css'
 import { useTitle } from '@/hooks/useTitle'
+import { useWarnOnUnload } from '@/hooks/useWarnOnUnload'
+import { useVibration } from '@/hooks/useVibration'
 
 export default function UsersPage() {
     useTitle('Пользователи')
+    const vibrate = useVibration()
+
     const [users, setUsers] = useState([])
     const [form, setForm] = useState({ username: '', email: '', phone: '', role: 'user' })
     const [loading, setLoading] = useState(false)
     const [error, setError] = useState(null)
+
+    // флаг несохранённые изменения для хука
+    const [isDirty, setIsDirty] = useState(false)
+    // подключаем предупреждение при закрытии вкладки
+    useWarnOnUnload(isDirty)
 
     // Получение списка пользователей
     async function fetchUsers() {
@@ -15,7 +24,7 @@ export default function UsersPage() {
         setError(null)
         try {
             const res = await fetch('/api/users')
-            if (!res.ok) throw new Error('Ошибка загрузки')
+            if (!res.ok) throw new Error('Ошибка загрузки', vibrate('false'))
             const data = await res.json()
             setUsers(data)
         } catch (e) {
@@ -32,6 +41,7 @@ export default function UsersPage() {
     // Обработка формы
     function handleChange(e) {
         setForm(prev => ({ ...prev, [e.target.name]: e.target.value }))
+        setIsDirty(true)
     }
 
     async function handleAdd(e) {
@@ -47,12 +57,15 @@ export default function UsersPage() {
             const data = await res.json()
 
             if (!res.ok) {
-                throw new Error(data.error || 'Ошибка создания пользователя')
+                throw new Error(data.error || 'Ошибка создания пользователя', vibrate('false'))
             }
 
             setUsers(prev => [...prev, data])
             setForm({ username: '', email: '', phone: '', role: 'user' })
+
+            setIsDirty(false) // сбрасываем грязь, после сохранения
         } catch (e) {
+            vibrate('warn')
             setError(e.message)
         }
     }
@@ -64,9 +77,10 @@ export default function UsersPage() {
             const res = await fetch(`/api/users/${id}`, {
                 method: 'DELETE',
             })
-            if (!res.ok) throw new Error('Ошибка удаления')
+            if (!res.ok) throw new Error('Ошибка удаления', vibrate('false'))
             setUsers(prev => prev.filter(u => u.id !== id))
         } catch (e) {
+            vibrate('false')
             setError(e.message)
         }
     }
@@ -79,10 +93,11 @@ export default function UsersPage() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(updatedFields),
             })
-            if (!res.ok) throw new Error('Ошибка обновления')
+            if (!res.ok) throw new Error('Ошибка обновления', vibrate('false'))
             const updatedUser = await res.json()
             setUsers(prev => prev.map(u => (u.id === id ? updatedUser : u)))
         } catch (e) {
+            vibrate('false')
             setError(e.message)
         }
     }
@@ -91,7 +106,6 @@ export default function UsersPage() {
         <div>
             <h1>Пользователи</h1>
 
-            {error && <div style={{ color: 'red' }}>{error}</div>}
             {loading ? (
                 <p>Загрузка...</p>
             ) : (
@@ -157,6 +171,8 @@ export default function UsersPage() {
                     </table>
                 </div>
             )}
+
+            {error && <div style={{ color: 'red' }}>{error}</div>}
 
             <h2>Добавить пользователя</h2>
             <div className={styles.formWrap}>

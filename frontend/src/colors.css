@@ -20,7 +20,7 @@
     --color-users-danger-hover: rgb(200, 0, 0);             /* Кнопка удаления наведена - users */
 
     /* Компоненты */
-    --color-header-bg: rgba(0, 0, 0, 0.65);                 /* Фон -  header*/
+    --color-header-bg: rgba(0, 0, 0, 0.5);                 /* Фон -  header*/
     --color-header-bg-stick: rgb(139, 139, 139);            /* Разделитель - header */
     --color-: ;
     --color-: ;

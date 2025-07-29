@@ -2,27 +2,27 @@ import { useState } from 'react'
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-import { checkSession } from '@/hooks/checkSession';
+import { useCheckSession } from '@/hooks/useCheckSession';
 import { useTitle } from '@/hooks/useTitle'
 import styles from './Login.module.css'
 
 export default function Login() {
     useTitle('Авторизация')
     
-    const [remember, setRemember] = useState(false)
+    const { authenticated, loading } = useCheckSession()
 
+    const [remember, setRemember] = useState(false)
     const yandexHref = `/api/yandex${remember ? '?remember=1' : ''}`
     const googleHref = `/api/google${remember ? '?remember=1' : ''}`
 
     const navigate = useNavigate();
 
     useEffect(() => {
-        checkSession().then(data => {
-            if (data.authenticated) {
-                navigate('/');
-            }
-        });
-    }, []);
+        if (!loading && authenticated) {
+            navigate(-1)
+        }
+        console.log('session loading:', loading, 'authenticated:', authenticated)
+    }, [loading, authenticated, navigate])
 
     return (
         <div className={styles.div}>
