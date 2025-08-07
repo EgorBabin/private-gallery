@@ -2,8 +2,13 @@ import 'dotenv/config'
 import express from 'express'
 import session from 'express-session'
 
-import https from 'https';
-import fs from 'fs';
+import https from 'https'
+import fs from 'fs'
+import helmet from 'helmet'
+import { rateLimit } from 'express-rate-limit'
+
+import cookieParser from 'cookie-parser'
+import csurf from 'csurf'
 
 import pgSession from 'connect-pg-simple'
 import pool from './db.js'
@@ -17,6 +22,20 @@ import authCheck from './utils/authCheck.js';
 import { logAction } from './utils/logger.js'
 
 const app = express()
+
+app.use(helmet())
+
+const limiter = rateLimit({
+	windowMs: 15 * 60 * 1000,
+	limit: 500,
+	standardHeaders: 'draft-8',
+	legacyHeaders: false,
+	ipv6Subnet: 56,
+})
+
+app.use(limiter)
+
+app.use(cookieParser())
 
 const httpsServer = https.createServer({
     key: fs.readFileSync('../SSL/key.pem'),
@@ -50,6 +69,14 @@ app.use(session({
         maxAge: 1000 * 60 * 30 // 30 минут по умолчанию
     }
 }))
+
+app.use(csurf({ cookie: true }))
+app.use((err, req, res, next) => {
+    if (err.code === 'EBADCSRFTOKEN') {
+        return res.status(403).json({ error: 'Invalid CSRF token' })
+    }
+    next(err)
+})
 
 app.use(useragent.express())
 // 🔒 Middleware проверки IP/UA

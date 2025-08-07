@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react'
 import styles from './Users.module.css'
 import { useTitle } from '@/hooks/useTitle'
+import { useCsrfFetch } from '@/hooks/useCsrfFetch'
 import { useWarnOnUnload } from '@/hooks/useWarnOnUnload'
 import { useVibration } from '@/hooks/useVibration'
 
 export default function UsersPage() {
     useTitle('Пользователи')
+    const csrfFetch = useCsrfFetch()
     const vibrate = useVibration()
 
     const [users, setUsers] = useState([])
@@ -23,7 +25,7 @@ export default function UsersPage() {
         setLoading(true)
         setError(null)
         try {
-            const res = await fetch('/api/users')
+            const res = await csrfFetch('/api/users')
             if (!res.ok) throw new Error('Ошибка загрузки', vibrate('false'))
             const data = await res.json()
             setUsers(data)
@@ -48,7 +50,7 @@ export default function UsersPage() {
         e.preventDefault()
         setError(null)
         try {
-            const res = await fetch('/api/users', {
+            const res = await csrfFetch('/api/users', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(form),
@@ -74,7 +76,7 @@ export default function UsersPage() {
     async function handleDelete(id) {
         if (!window.confirm('Удалить пользователя?')) return
         try {
-            const res = await fetch(`/api/users/${id}`, {
+            const res = await csrfFetch(`/api/users/${id}`, {
                 method: 'DELETE',
             })
             if (!res.ok) throw new Error('Ошибка удаления', vibrate('false'))
@@ -88,7 +90,7 @@ export default function UsersPage() {
     // Обновление пользователя (например, изменить роль)
     async function handleUpdate(id, updatedFields) {
         try {
-            const res = await fetch(`/api/users/${id}`, {
+            const res = await csrfFetch(`/api/users/${id}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(updatedFields),

@@ -17,6 +17,10 @@ dotenv
 pg
 express-useragent
 connect-pg-simple
+helmet
+csurf
+cookie-parser
+express-rate-limit
 
 ## db for session 
 CREATE TABLE "session" (

@@ -13,8 +13,8 @@ import { useCallback } from "react"
 */
 
 const patterns = {
-    click: 50,
-    true: 30,
+    click: 10,
+    true: 20,
     warn: 200,
     false: [100, 50, 100],
 }
