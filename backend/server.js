@@ -70,12 +70,31 @@ app.use(session({
     }
 }))
 
-app.use(csurf({ cookie: true }))
+// for local use
+app.use((req, res, next) => {
+    console.log('COOKIE _csrf:', req.cookies._csrf)
+    console.log('HEADER X-CSRF-Token:', req.get('X-CSRF-Token'))
+    next()
+})
+// // for local use
+
+app.use(csurf({
+    cookie: {
+        httpOnly: true,
+        secure: true,
+        sameSite: 'lax'
+    }
+}))
+
 app.use((err, req, res, next) => {
     if (err.code === 'EBADCSRFTOKEN') {
         return res.status(403).json({ error: 'Invalid CSRF token' })
     }
     next(err)
+})
+
+app.get('/api/csrf-token', (req, res) => {
+    res.json({ csrfToken: req.csrfToken() })
 })
 
 app.use(useragent.express())

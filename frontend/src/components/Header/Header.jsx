@@ -12,7 +12,7 @@ export default function Header() {
                 <Link to="/" onClick={() => vibrate('click')}>
                     <Film  strokeWidth={2} />
                 </Link>
-                <a to="/api/hello" onClick={() => vibrate('click')}>
+                <a href="/api/hello" onClick={() => vibrate('click')}>
                     <LayoutDashboard />
                 </a>
                 <Link to="/login" onClick={() => vibrate('click')}>

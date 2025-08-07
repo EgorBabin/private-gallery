@@ -1,32 +1,29 @@
-import { useCallback } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 
 export function useCsrfFetch() {
-    const getCsrfToken = () => {
-        const match = document.cookie
-        .split('; ')
-        .find(row => row.startsWith('_csrf='))
-        return match ? match.split('=')[1] : ''
-    }
+    const [token, setToken] = useState(null)
 
-    const csrfFetch = useCallback(async (url, options = {}) => {
+    useEffect(() => {
+        fetch('/api/csrf-token', { credentials: 'include' })
+        .then(r => r.json())
+        .then(({ csrfToken }) => setToken(csrfToken))
+        .catch(console.error)
+    }, [])
+
+    return useCallback(async (url, options = {}) => {
         const method = (options.method || 'GET').toUpperCase()
-        const token = getCsrfToken()
-        const headers = {
-        ...(options.headers || {}),
-        // для всех опасных запросов добавляем токен
-        ...(method !== 'GET' && method !== 'HEAD'
-            ? { 'X-CSRF-Token': token }
-            : {})
+        const headers = { ...(options.headers || {}) }
+
+        if (['POST','PUT','PATCH','DELETE'].includes(method)) {
+        if (!token) throw new Error('CSRF token not ready')
+        headers['X-CSRF-Token'] = token
+        headers['Content-Type'] = headers['Content-Type'] || 'application/json'
         }
 
-        const res = await fetch(url, {
+        return fetch(url, {
         credentials: 'include',
         ...options,
         headers
         })
-
-        return res
-    }, [])
-
-    return csrfFetch
+    }, [token])
 }
