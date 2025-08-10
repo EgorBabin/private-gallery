@@ -1,55 +1,55 @@
 .header {
-    z-index: 50;
-    position: fixed;
-    text-align: center;
-    display: flex; 
-    justify-content: center;
-    align-items: center;
-    left: 0;
-    bottom: 5px;
-    min-width: 120px;
-    width: 100%;
+  z-index: 50;
+  position: fixed;
+  text-align: center;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  left: 0;
+  bottom: 5px;
+  min-width: 120px;
+  width: 100%;
 }
 
-.nav { 
-    width: clamp(120px, 70%, 300px);
-    border-radius: 0.7rem;
+.nav {
+  width: clamp(120px, 70%, 300px);
+  border-radius: 0.7rem;
 
-    background-color: var(--color-header-bg);
-    border: 2px solid transparent;
-    box-shadow: 0 10px 32px var(--color-header-bg);
+  background-color: var(--color-header-bg);
+  border: 2px solid transparent;
+  box-shadow: 0 10px 32px var(--color-header-bg);
 
-    @supports (backdrop-filter: url(#frosted)) {
-        backdrop-filter: url(#frosted);
-        -webkit-backdrop-filter: url(#frosted);
-    }
+  @supports (backdrop-filter: url(#frosted)) {
+    backdrop-filter: url(#frosted);
+    -webkit-backdrop-filter: url(#frosted);
+  }
 
-    @supports not (backdrop-filter: url(#frosted)) {
-        backdrop-filter: blur(10px);
-        -webkit-backdrop-filter: blur(10px);
-    }
+  @supports not (backdrop-filter: url(#frosted)) {
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+  }
 }
 
 header svg {
-    width: auto;
-    height: auto;
+  width: auto;
+  height: auto;
 }
 
 .nav a {
-    position: relative;
-    padding: 0 0.5rem;
-    text-decoration: none;
-    color: inherit;
+  position: relative;
+  padding: 0 0.5rem;
+  text-decoration: none;
+  color: inherit;
 }
 
 .nav a:not(:last-child)::after {
-    content: "";
-    display: inline-block;
-    width: 1px;
-    height: 1cap;
-    background-color: var(--color-header-bg-stick);
-    position: absolute;
-    right: 0;
-    top: 50%;
-    transform: translateY(-50%);
+  content: '';
+  display: inline-block;
+  width: 1px;
+  height: 1cap;
+  background-color: var(--color-header-bg-stick);
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
 }

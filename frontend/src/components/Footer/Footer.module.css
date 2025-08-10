@@ -1,10 +1,10 @@
 .footer {
-    z-index: 50;
-    width: 100%;
-    left: 0;
-    bottom: 0;
-    margin-top: auto;
-    padding: 20px;
-    background-color: var(--color-background-surface);
-    text-align: center;
+  z-index: 50;
+  width: 100%;
+  left: 0;
+  bottom: 0;
+  margin-top: auto;
+  padding: 20px;
+  background-color: var(--color-background-surface);
+  text-align: center;
 }

@@ -1,42 +1,46 @@
-import { useState } from 'react'
+import { useState } from 'react';
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import { useCheckSession } from '@/hooks/useCheckSession';
-import { useTitle } from '@/hooks/useTitle'
-import styles from './Login.module.css'
+import { useTitle } from '@/hooks/useTitle';
+import styles from './Login.module.css';
 
 export default function Login() {
-    useTitle('Авторизация')
-    
-    const { authenticated, loading } = useCheckSession()
+  useTitle('Авторизация');
 
-    const [remember, setRemember] = useState(false)
-    const yandexHref = `/api/yandex${remember ? '?remember=1' : ''}`
-    const googleHref = `/api/google${remember ? '?remember=1' : ''}`
+  const { authenticated, loading } = useCheckSession();
 
-    const navigate = useNavigate();
+  const [remember, setRemember] = useState(false);
+  const yandexHref = `/api/yandex${remember ? '?remember=1' : ''}`;
+  const googleHref = `/api/google${remember ? '?remember=1' : ''}`;
 
-    useEffect(() => {
-        if (!loading && authenticated) {
-            navigate(-1)
-        }
-        console.log('session loading:', loading, 'authenticated:', authenticated)
-    }, [loading, authenticated, navigate])
+  const navigate = useNavigate();
 
-    return (
-        <div className={styles.div}>
-            <label className={styles.checkbox}>
-                <input
-                    type="checkbox"
-                    checked={remember}
-                    onChange={e => setRemember(e.target.checked)}
-                />
-                Запомнить меня
-            </label>
+  useEffect(() => {
+    if (!loading && authenticated) {
+      navigate(-1);
+    }
+    console.log('session loading:', loading, 'authenticated:', authenticated);
+  }, [loading, authenticated, navigate]);
 
-            <a className={styles.google} href={googleHref}>Google</a>
-            <a className={styles.yandex} href={yandexHref}>Yandex</a>
-        </div>
-    )
+  return (
+    <div className={styles.div}>
+      <label className={styles.checkbox}>
+        <input
+          type="checkbox"
+          checked={remember}
+          onChange={(e) => setRemember(e.target.checked)}
+        />
+        Запомнить меня
+      </label>
+
+      <a className={styles.google} href={googleHref}>
+        Google
+      </a>
+      <a className={styles.yandex} href={yandexHref}>
+        Yandex
+      </a>
+    </div>
+  );
 }

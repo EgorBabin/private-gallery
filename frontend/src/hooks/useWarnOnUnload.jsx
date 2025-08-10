@@ -6,17 +6,17 @@ import { useEffect } from 'react';
 */
 
 export function useWarnOnUnload(enabled) {
-    useEffect(() => {
-        if (!enabled) return;
+  useEffect(() => {
+    if (!enabled) return;
 
-        const handler = (e) => {
-            e.preventDefault();
-            e.returnValue = '';
-        };
+    const handler = (e) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
 
-        window.addEventListener('beforeunload', handler);
-        return () => {
-            window.removeEventListener('beforeunload', handler);
-        };
-    }, [enabled]);
+    window.addEventListener('beforeunload', handler);
+    return () => {
+      window.removeEventListener('beforeunload', handler);
+    };
+  }, [enabled]);
 }

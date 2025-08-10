@@ -22,6 +22,11 @@ csurf
 cookie-parser
 express-rate-limit
 
+eslint
+prettier
+eslint-config-prettier
+eslint-plugin-prettier
+
 ## db for session 
 CREATE TABLE "session" (
     "sid" varchar NOT NULL COLLATE "default",

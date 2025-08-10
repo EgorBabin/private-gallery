@@ -1,15 +1,15 @@
 @import './colors.css';
 
 * {
-	padding: 0px;
-	margin: 0px;
-	border: none;
+  padding: 0px;
+  margin: 0px;
+  border: none;
 }
 
 *,
 *::before,
 *::after {
-	box-sizing: border-box;
+  box-sizing: border-box;
 }
 
 :root {
@@ -48,7 +48,12 @@ svg {
   width: 1cap;
 }
 
-h1, h2, h3, h4, h5, h6 {
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
   overflow-wrap: anywhere;
   word-break: break-word;
   hyphens: auto;

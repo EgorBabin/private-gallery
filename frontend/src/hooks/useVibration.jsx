@@ -1,5 +1,4 @@
-import { useCallback } from "react"
-
+import { useCallback } from 'react';
 
 // import { useVibration } from '@/hooks/useVibration'
 // const vibrate = useVibration()
@@ -13,18 +12,18 @@ import { useCallback } from "react"
 */
 
 const patterns = {
-    click: 10,
-    true: 20,
-    warn: 200,
-    false: [100, 50, 100],
-}
+  click: 10,
+  true: 20,
+  warn: 200,
+  false: [100, 50, 100],
+};
 
 export function useVibration() {
-    const vibrate = useCallback((type) => {
-        if (!('vibrate' in navigator)) return
-        const pattern  = patterns[type] ?? patterns.click
-        navigator.vibrate(pattern)
-        console.log(type, pattern)
-    }, [])
-    return vibrate
+  const vibrate = useCallback((type) => {
+    if (!('vibrate' in navigator)) return;
+    const pattern = patterns[type] ?? patterns.click;
+    navigator.vibrate(pattern);
+    console.log(type, pattern);
+  }, []);
+  return vibrate;
 }

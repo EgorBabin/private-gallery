@@ -1,109 +1,108 @@
 .tableWrap {
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .tableWrap table {
-    width: 100%;
-    border-collapse: collapse;
-    table-layout: auto;
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: auto;
 }
 
 .tableWrap table th,
 .tableWrap table td {
-    padding: 0.2rem 0.2rem;
-    white-space: nowrap;
-    text-align: left;
-    border: 1px solid var(--color-users-border);
+  padding: 0.2rem 0.2rem;
+  white-space: nowrap;
+  text-align: left;
+  border: 1px solid var(--color-users-border);
 }
 
 .tableWrap table input {
-    max-width: 250px;
-    padding: 0.4rem 0.6rem;
-    border: 1px solid var(--color-users-border);
-    border-radius: 0.7rem;
-    font-size: 0.6rem;
-    color: var(--color-text-primary);
-    background-color: var(--color-users-bg-field);
-    box-sizing: border-box;
+  max-width: 250px;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--color-users-border);
+  border-radius: 0.7rem;
+  font-size: 0.6rem;
+  color: var(--color-text-primary);
+  background-color: var(--color-users-bg-field);
+  box-sizing: border-box;
 }
 
 .tableWrap table input:focus {
-    outline: none;
-    border-color: var(--color-users-border-focus);
-    box-shadow: 0 0 0 2px --color-users-box-shadow-focus;
+  outline: none;
+  border-color: var(--color-users-border-focus);
+  box-shadow: 0 0 0 2px --color-users-box-shadow-focus;
 }
 
 .tableWrap table select {
-    padding: 0.4rem 0.6rem;
-    border: 1px solid var(--color-users-border);
-    border-radius: 0.7rem;
-    font-size: 0.6rem;
-    color: var(--color-text-primary);
-    background-color: var(--color-users-bg-field);
-    background-repeat: no-repeat;
-    background-position: right 0.5rem center;
-    box-sizing: border-box;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--color-users-border);
+  border-radius: 0.7rem;
+  font-size: 0.6rem;
+  color: var(--color-text-primary);
+  background-color: var(--color-users-bg-field);
+  background-repeat: no-repeat;
+  background-position: right 0.5rem center;
+  box-sizing: border-box;
 }
 
 .tableWrap table button {
-    padding: 0.4rem 0.8rem;
-    border-radius: 0.7rem;
-    background-color: var(--color-users-danger-hover);
-    color: var(--color-text-primary);
-    font-size: 0.8rem;
-    cursor: pointer;
-    transition: background-color 0.2s;
-    }
-
-.tableWrap table button:hover {
-    background-color: var(--color-users-danger);
+  padding: 0.4rem 0.8rem;
+  border-radius: 0.7rem;
+  background-color: var(--color-users-danger-hover);
+  color: var(--color-text-primary);
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: background-color 0.2s;
 }
 
+.tableWrap table button:hover {
+  background-color: var(--color-users-danger);
+}
 
 .formWrap {
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .formWrap input {
-    padding: 0.4rem 0.6rem;
-    border: 1px solid var(--color-users-border);
-    border-radius: 0.7rem;
-    font-size: 0.6rem;
-    color: var(--color-text-primary);
-    background-color: var(--color-users-bg-field);
-    box-sizing: border-box;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--color-users-border);
+  border-radius: 0.7rem;
+  font-size: 0.6rem;
+  color: var(--color-text-primary);
+  background-color: var(--color-users-bg-field);
+  box-sizing: border-box;
 }
 
 .formWrap input:focus {
-    outline: none;
-    border-color: var(--color-users-border-focus);
-    box-shadow: 0 0 0 2px var(--color-users-box-shadow-focus);
+  outline: none;
+  border-color: var(--color-users-border-focus);
+  box-shadow: 0 0 0 2px var(--color-users-box-shadow-focus);
 }
 
 .formWrap select {
-    padding: 0.4rem 0.6rem;
-    border: 1px solid var(--color-users-border);
-    border-radius: 0.7rem;
-    font-size: 0.6rem;
-    color: var(--color-text-primary);
-    background-color: var(--color-users-bg-field);
-    background-repeat: no-repeat;
-    background-position: right 0.5rem center;
-    box-sizing: border-box;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--color-users-border);
+  border-radius: 0.7rem;
+  font-size: 0.6rem;
+  color: var(--color-text-primary);
+  background-color: var(--color-users-bg-field);
+  background-repeat: no-repeat;
+  background-position: right 0.5rem center;
+  box-sizing: border-box;
 }
 
 .formWrap button {
-    padding: 0.4rem 0.8rem;
-    border-radius: 0.7rem;
-    background-color: var(--color-users-danger-hover);
-    color: var(--color-text-primary);
-    font-size: 0.8rem;
-    cursor: pointer;
-    transition: background-color 0.2s;
-    }
+  padding: 0.4rem 0.8rem;
+  border-radius: 0.7rem;
+  background-color: var(--color-users-danger-hover);
+  color: var(--color-text-primary);
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
 
 .formWrap button:hover {
-    background-color: var(--color-users-danger);
+  background-color: var(--color-users-danger);
 }

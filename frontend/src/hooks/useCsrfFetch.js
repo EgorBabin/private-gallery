@@ -1,29 +1,32 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback } from 'react';
 
 export function useCsrfFetch() {
-    const [token, setToken] = useState(null)
+  const [token, setToken] = useState(null);
 
-    useEffect(() => {
-        fetch('/api/csrf-token', { credentials: 'include' })
-        .then(r => r.json())
-        .then(({ csrfToken }) => setToken(csrfToken))
-        .catch(console.error)
-    }, [])
+  useEffect(() => {
+    fetch('/api/csrf-token', { credentials: 'include' })
+      .then((r) => r.json())
+      .then(({ csrfToken }) => setToken(csrfToken))
+      .catch(console.error);
+  }, []);
 
-    return useCallback(async (url, options = {}) => {
-        const method = (options.method || 'GET').toUpperCase()
-        const headers = { ...(options.headers || {}) }
+  return useCallback(
+    async (url, options = {}) => {
+      const method = (options.method || 'GET').toUpperCase();
+      const headers = { ...(options.headers || {}) };
 
-        if (['POST','PUT','PATCH','DELETE'].includes(method)) {
-        if (!token) throw new Error('CSRF token not ready')
-        headers['X-CSRF-Token'] = token
-        headers['Content-Type'] = headers['Content-Type'] || 'application/json'
-        }
+      if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
+        if (!token) throw new Error('CSRF token not ready');
+        headers['X-CSRF-Token'] = token;
+        headers['Content-Type'] = headers['Content-Type'] || 'application/json';
+      }
 
-        return fetch(url, {
+      return fetch(url, {
         credentials: 'include',
         ...options,
-        headers
-        })
-    }, [token])
+        headers,
+      });
+    },
+    [token],
+  );
 }

@@ -1,31 +1,44 @@
 /* @import './colors' */
 
 :root {
-    /* Базовые (нейтральные) */
-    --color-text-primary: rgb(255, 255, 255);               /* Текст главный */
-    --color-text-secondary: rgb(36, 36, 36);                /* Текст второстепенный */
-    --color-text-secondary: ;                                 /* Текст-подсказка / плейсхолдер */
-    --color-background-default: ;                             /* Фон страницы */
-    --color-background-surface: rgb(32, 35, 42);            /* Фон контейнeра / карточки */
-    --color-border: ;                                         /* Граница / разделитель */
+  /* Базовые (нейтральные) */
+  --color-text-primary: rgb(255, 255, 255); /* Текст главный */
+  --color-text-secondary: rgb(36, 36, 36); /* Текст второстепенный */
+  --color-text-secondary: ; /* Текст-подсказка / плейсхолдер */
+  --color-background-default: ; /* Фон страницы */
+  --color-background-surface: rgb(32, 35, 42); /* Фон контейнeра / карточки */
+  --color-border: ; /* Граница / разделитель */
 
-    /* Страница */
-    --color-login-btn-google: rgb(95, 158, 160);            /* Кнопка входа - google */
-    --color-login-btn-yandex: rgb(165, 54, 42);             /* Кнопка входа - yandex */
-    --color-users-border: rgb(150, 150, 150);               /* Граница форм users*/
-    --color-users-bg-field: rgb(17, 17, 17);                /*  */
-    --color-users-border-focus: rgb(38, 132, 255);          /* Граница при фокусе на формы - users */
-    --color-users-box-shadow-focus: rgba(38,132,255,0.3);   /* Тень при фокусе - users */
-    --color-users-danger: rgb(102, 0, 0);                   /* Кнопка удаления - users */
-    --color-users-danger-hover: rgb(200, 0, 0);             /* Кнопка удаления наведена - users */
+  /* Страница */
+  --color-login-btn-google: rgb(95, 158, 160); /* Кнопка входа - google */
+  --color-login-btn-yandex: rgb(165, 54, 42); /* Кнопка входа - yandex */
+  --color-users-border: rgb(150, 150, 150); /* Граница форм users*/
+  --color-users-bg-field: rgb(17, 17, 17); /*  */
+  --color-users-border-focus: rgb(
+    38,
+    132,
+    255
+  ); /* Граница при фокусе на формы - users */
+  --color-users-box-shadow-focus: rgba(
+    38,
+    132,
+    255,
+    0.3
+  ); /* Тень при фокусе - users */
+  --color-users-danger: rgb(102, 0, 0); /* Кнопка удаления - users */
+  --color-users-danger-hover: rgb(
+    200,
+    0,
+    0
+  ); /* Кнопка удаления наведена - users */
 
-    /* Компоненты */
-    --color-header-bg: rgba(0, 0, 0, 0.2);                 /* Фон -  header*/
-    --color-header-bg-stick: rgb(139, 139, 139);            /* Разделитель - header */
-    --color-: ;
-    --color-: ;
-    --color-: ;
-    --color-: ;
-    --color-: ;
-    --color-: ;
+  /* Компоненты */
+  --color-header-bg: rgba(0, 0, 0, 0.2); /* Фон -  header*/
+  --color-header-bg-stick: rgb(139, 139, 139); /* Разделитель - header */
+  --color-: ;
+  --color-: ;
+  --color-: ;
+  --color-: ;
+  --color-: ;
+  --color-: ;
 }
