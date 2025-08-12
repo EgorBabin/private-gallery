@@ -14,7 +14,7 @@ export default defineConfig([
         extends: ['js/recommended', prettierConfig],
         rules: {
             ...prettierPlugin.configs.recommended.rules,
-            'no-console': 'warn',
+            // 'no-console': 'warn', // // for local use
             eqeqeq: 'warn',
             curly: 'warn',
             'no-else-return': 'warn',

@@ -1,4 +1,5 @@
-import { BrowserRouter, Routes, Route, Link } from 'react-router-dom';
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import useHttpInterceptor from './hooks/useHttpInterceptor';
 // pages
 import Home from '@/pages/Home/Home';
 import Users from '@/pages/Admin/Users';
@@ -9,6 +10,8 @@ import Header from '@/components/Header/Header';
 import Footer from '@/components/Footer/Footer';
 
 function App() {
+  useHttpInterceptor();
+
   return (
     <BrowserRouter>
       <Header />

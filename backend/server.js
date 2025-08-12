@@ -21,6 +21,8 @@ import yandexRoutes from './routes/yandex.js';
 import authCheck from './utils/authCheck.js';
 import { logAction } from './utils/logger.js';
 
+import checkSession from './utils/checkSession.js';
+
 const app = express();
 
 app.use(helmet());
@@ -74,6 +76,7 @@ app.use(
             sameSite: 'lax',
             maxAge: 1000 * 60 * 30, // 30 минут по умолчанию
         },
+        name: process.env.SESSION,
     }),
 );
 
@@ -129,7 +132,7 @@ app.use(async (req, res, next) => {
             );
             console.warn('⚠️ Подозрительная активность: IP или UA изменены');
             req.session.destroy(() => {
-                res.clearCookie('connect.sid');
+                res.clearCookie(process.env.SESSION);
                 return res
                     .status(401)
                     .json({ error: 'Сессия недействительна' });
@@ -142,9 +145,11 @@ app.use(async (req, res, next) => {
 
 // Подключаем роуты
 app.use('/api/', checkWork);
-app.use('/api/users/', usersRoutes);
 app.use('/api/yandex/', yandexRoutes);
 app.use('/api/check-session/', authCheck);
+
+app.use(checkSession()); // вы в безопасности:
+app.use('/api/users/', usersRoutes);
 
 app.use((err, req, res) => {
     console.error(err.stack);

@@ -79,7 +79,8 @@ export async function logAction(req, action, extra = {}) {
         `<b>Device:</b> ${device}`,
         `<b>Time:</b> ${timestamp}`,
         `<b>IP:</b> ${ip}`,
-        `<b>URL:</b> ${method} ${url}`,
+        `<b>URL:</b> ${method}`,
+        `${process.env.FRONTEND_URL}${url}`,
         `<b>${authType}</b>`,
         `${extraData ? `📎 ${extraData}` : ''}`,
     ];
