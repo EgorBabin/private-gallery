@@ -1,7 +1,7 @@
 {
     "name": "backend",
     "version": "1.0.0",
-    "main": "index.js",
+    "main": "server.js",
     "type": "module",
     "scripts": {
         "start": "node server.js",
@@ -15,17 +15,17 @@
     "license": "ISC",
     "description": "",
     "dependencies": {
-        "connect-pg-simple": "^10.0.0",
-        "cookie-parser": "^1.4.7",
-        "cors": "^2.8.5",
-        "csurf": "^1.11.0",
-        "dotenv": "^17.2.0",
-        "express": "^5.1.0",
-        "express-rate-limit": "^8.0.1",
-        "express-session": "^1.18.1",
-        "express-useragent": "^1.0.15",
-        "helmet": "^8.1.0",
-        "pg": "^8.16.3"
+        "connect-pg-simple": "10.0.0",
+        "cookie-parser": "1.4.7",
+        "cors": "2.8.5",
+        "csurf": "1.11.0",
+        "dotenv": "17.2.0",
+        "express": "5.1.0",
+        "express-rate-limit": "8.0.1",
+        "express-session": "1.18.1",
+        "express-useragent": "1.0.15",
+        "helmet": "8.1.0",
+        "pg": "8.16.3"
     },
     "devDependencies": {
         "@eslint/js": "^9.32.0",
