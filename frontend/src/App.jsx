@@ -9,11 +9,11 @@ import NotFound from '@/pages/404/404';
 import Header from '@/components/Header/Header';
 import Footer from '@/components/Footer/Footer';
 
-function App() {
+function AppInner() {
   useHttpInterceptor();
 
   return (
-    <BrowserRouter>
+    <>
       <Header />
 
       <Routes>
@@ -25,6 +25,14 @@ function App() {
       </Routes>
 
       <Footer />
+    </>
+  );
+}
+
+function App() {
+  return (
+    <BrowserRouter>
+      <AppInner />
     </BrowserRouter>
   );
 }

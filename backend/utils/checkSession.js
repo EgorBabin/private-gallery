@@ -15,7 +15,7 @@ import { logAction } from '../utils/logger.js';
 const DEFAULTS = {
     requiredFields: ['id', 'username', 'email', 'authType'],
     sessionCookieName: process.env.SESSION || 'session',
-    frontendLoginPath: (process.env.FRONTEND_URL || '') + 'login',
+    frontendLoginPath: 'login',
     treatEmpty: (v) =>
         v === null ||
         v === undefined ||
@@ -40,6 +40,7 @@ export default function checkSession(opts = {}) {
     const cfg = { ...DEFAULTS, ...opts };
 
     return async (req, res, next) => {
+        const missing = [];
         try {
             if (!req.session) {
                 try {
@@ -96,13 +97,11 @@ export default function checkSession(opts = {}) {
                     return res.status(401).json({
                         error: 'invalid_session',
                         redirect: cfg.frontendLoginPath,
-                        missing,
                     });
                 }
                 return res.redirect(cfg.frontendLoginPath);
             }
 
-            const missing = [];
             for (const f of cfg.requiredFields) {
                 const v = user[f];
                 if (cfg.treatEmpty(v)) missing.push(f);

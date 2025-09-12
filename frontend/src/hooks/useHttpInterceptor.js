@@ -8,7 +8,6 @@ export default function useHttpInterceptor({
   const navigate = useNavigate();
 
   useEffect(() => {
-    // --- fetch interceptor (устанавливаем один раз) ---
     if (!globalThis.__httpInterceptorFetchInstalled) {
       const _fetch = window.fetch.bind(window);
 
@@ -55,7 +54,6 @@ export default function useHttpInterceptor({
       globalThis.__httpInterceptorFetchInstalled = true;
     }
 
-    // --- axios interceptor (если axios доступен глобально) ---
     let axiosEjectId = null;
     try {
       const ax = globalThis.axios || window.axios;
@@ -88,7 +86,6 @@ export default function useHttpInterceptor({
     }
 
     return () => {
-      // cleanup axios interceptor
       try {
         const ax = globalThis.axios || window.axios;
         if (ax && axiosEjectId != null)
