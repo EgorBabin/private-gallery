@@ -60,8 +60,9 @@ export default function checkSession(opts = {}) {
                 } catch (err) {
                     console.debug('clearCookie failed (no session):', err);
                 }
-                if (isApiRequest(req))
+                if (isApiRequest(req)) {
                     return res.status(401).json({ error: 'no_session' });
+                }
                 return res.redirect(cfg.frontendLoginPath);
             }
 
@@ -104,18 +105,22 @@ export default function checkSession(opts = {}) {
 
             for (const f of cfg.requiredFields) {
                 const v = user[f];
-                if (cfg.treatEmpty(v)) missing.push(f);
+                if (cfg.treatEmpty(v)) {
+                    missing.push(f);
+                }
             }
 
             if (!missing.includes('id')) {
                 const idVal = user.id;
-                if (!Number.isInteger(Number(idVal)))
+                if (!Number.isInteger(Number(idVal))) {
                     missing.push('id(not-number)');
+                }
             }
             if (!missing.includes('email')) {
                 const emailVal = user.email;
-                if (!emailRe.test(String(emailVal || '')))
+                if (!emailRe.test(String(emailVal || ''))) {
                     missing.push('email(bad-format)');
+                }
             }
 
             // IP/UA
@@ -124,10 +129,12 @@ export default function checkSession(opts = {}) {
                     req.headers['x-forwarded-for']?.split(',')[0] ||
                     req.socket.remoteAddress;
                 const currentUa = req.headers['user-agent'];
-                if (req.session.ip && req.session.ip !== currentIp)
+                if (req.session.ip && req.session.ip !== currentIp) {
                     missing.push('ip_mismatch');
-                if (req.session.ua && req.session.ua !== currentUa)
+                }
+                if (req.session.ua && req.session.ua !== currentUa) {
                     missing.push('ua_mismatch');
+                }
             }
 
             if (missing.length > 0) {
@@ -164,10 +171,11 @@ export default function checkSession(opts = {}) {
                 } catch (err) {
                     console.debug('clearCookie failed (invalid session):', err);
                 }
-                if (isApiRequest(req))
+                if (isApiRequest(req)) {
                     return res
                         .status(401)
                         .json({ error: 'invalid_session', missing });
+                }
                 return res.redirect(cfg.frontendLoginPath);
             }
 
@@ -180,8 +188,9 @@ export default function checkSession(opts = {}) {
             } catch (logErr) {
                 console.debug('logAction failed (exception):', logErr);
             }
-            if (isApiRequest(req))
+            if (isApiRequest(req)) {
                 return res.status(500).json({ error: 'internal' });
+            }
             return res.redirect(cfg.frontendLoginPath);
         }
     };

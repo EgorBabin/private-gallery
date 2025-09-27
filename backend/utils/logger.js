@@ -26,7 +26,9 @@ function getDeviceType(req) {
 }
 
 async function sendToTelegram(message) {
-    if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) return;
+    if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) {
+        return;
+    }
 
     try {
         await fetch(
@@ -70,7 +72,9 @@ export async function logAction(req, action, extra = {}) {
     const logEntry = `[${timestamp}] IP: ${ip} | ${method} ${url} | ${device} | Email: ${email} | Auth: ${authType} | Action: ${action}${extra && Object.keys(extra).length ? ` | Extra: ${JSON.stringify(extra)}` : ''}\n`;
 
     fs.appendFile(logPath, logEntry, (err) => {
-        if (err) console.error('Ошибка записи лога:', err);
+        if (err) {
+            console.error('Ошибка записи лога:', err);
+        }
     });
 
     const lines = [

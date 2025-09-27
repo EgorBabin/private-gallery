@@ -23,6 +23,8 @@ import { logAction } from './utils/logger.js';
 
 import checkSession from './utils/checkSession.js';
 
+import galleryRoutes from './routes/gallery.js';
+
 const app = express();
 
 app.use(helmet());
@@ -150,6 +152,7 @@ app.use('/api/check-session/', authCheck);
 
 app.use(checkSession()); // вы в безопасности:
 app.use('/api/users/', usersRoutes);
+app.use('/api/gallery', galleryRoutes);
 
 app.use((err, req, res) => {
     console.error(err.stack);

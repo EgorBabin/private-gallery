@@ -90,8 +90,9 @@ router.put('/:id', async (req, res) => {
             'UPDATE users SET username = COALESCE($1, username), email = COALESCE($2, email), role = COALESCE($3, role), phone = COALESCE($4, phone) WHERE id = $5 RETURNING *',
             [username, email, role, phone, id],
         );
-        if (rows.length === 0)
+        if (rows.length === 0) {
             return res.status(404).json({ error: 'User not found' });
+        }
         res.json(rows[0]);
     } catch (err) {
         console.error(err);

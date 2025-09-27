@@ -12,15 +12,18 @@
 ### backend         ### frontend
 express             react-router-dom
 express-session     lucide-react
-cors
-dotenv
-pg
-express-useragent
+cors                react-window
+dotenv              react-virtualized-auto-sizer
+pg                  swiper
+express-useragent   react-dom
 connect-pg-simple
 helmet
 csurf
 cookie-parser
 express-rate-limit
+@aws-sdk/client-s3
+@aws-sdk/s3-request-presigner
+🕰️ sharp
 
 eslint
 prettier
