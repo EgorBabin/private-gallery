@@ -1,6 +1,14 @@
 import { Link } from 'react-router-dom';
 import styles from './Header.module.css';
-import { Film, LayoutDashboard, LogIn, Users } from 'lucide-react';
+import {
+  Film,
+  LogIn,
+  Users,
+  GlassWater,
+  Sunset,
+  MountainSnow,
+  Trees,
+} from 'lucide-react';
 import { useVibration } from '@/hooks/useVibration';
 
 export default function Header() {
@@ -19,6 +27,19 @@ export default function Header() {
         </Link>
         <Link to="/users" onClick={() => vibrate('click')}>
           <Users />
+        </Link>
+
+        <Link to="/2028/ocean" onClick={() => vibrate('click')}>
+          <GlassWater />
+        </Link>
+        <Link to="/2028/sunset" onClick={() => vibrate('click')}>
+          <Sunset />
+        </Link>
+        <Link to="/2023/moun" onClick={() => vibrate('click')}>
+          <MountainSnow />
+        </Link>
+        <Link to="/2013/forest" onClick={() => vibrate('click')}>
+          <Trees />
         </Link>
       </nav>
     </header>

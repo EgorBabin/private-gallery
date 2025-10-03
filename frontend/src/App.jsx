@@ -21,7 +21,6 @@ function AppInner() {
       <Header />
 
       <Routes>
-        <Route path="/" element={<Home />} />
         <Route path="/" element={<GalleryList />} />
         <Route path="/:year/:category" element={<GalleryView />} />
         <Route path="/users" element={<Users />} />

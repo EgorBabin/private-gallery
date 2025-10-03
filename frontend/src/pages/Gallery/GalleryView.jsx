@@ -1,8 +1,7 @@
-import React, { useEffect, useState, useCallback } from 'react';
+// src/pages/Gallery/GalleryView.jsx
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import AutoSizer from 'react-virtualized-auto-sizer';
-import { FixedSizeGrid as Grid } from 'react-window';
-import Lightbox from '@/components/Lightbox/Lightbox';
+import Lightbox from '@/components/Lightbox/Lightbox'; // оставил твой лайтбокс
 
 const API = '/api/gallery';
 
@@ -12,96 +11,234 @@ export default function GalleryView() {
   const [items, setItems] = useState([]);
   const [openIndex, setOpenIndex] = useState(-1);
   const [originalUrls, setOriginalUrls] = useState([]);
+  const scrollRef = useRef(null);
 
+  // fetch previews
   useEffect(() => {
-    fetch(`${API}/previews?prefix=${encodeURIComponent(prefix)}`, {
-      credentials: 'include',
-    })
-      .then((r) => r.json())
-      .then((d) => setItems(d.items || []))
-      .catch(() => setItems([]));
+    const controller = new AbortController();
+    let mounted = true;
+
+    (async () => {
+      try {
+        const res = await fetch(
+          `${API}/previews?prefix=${encodeURIComponent(prefix)}`,
+          { credentials: 'include', signal: controller.signal },
+        );
+        if (!mounted) return;
+        if (!res.ok) {
+          setItems([]);
+          setOriginalUrls([]);
+          return;
+        }
+        const d = await res.json();
+        const newItems = d.items || [];
+        setItems(newItems);
+        setOriginalUrls((prev) => {
+          const arr = new Array(newItems.length);
+          for (let i = 0; i < Math.min(prev.length, arr.length); i++)
+            arr[i] = prev[i];
+          return arr;
+        });
+      } catch (e) {
+        if (e.name === 'AbortError') return;
+        if (!mounted) return;
+        setItems([]);
+        setOriginalUrls([]);
+      }
+    })();
+
+    return () => {
+      mounted = false;
+      controller.abort();
+    };
   }, [prefix]);
+
+  // lazy-load images via IntersectionObserver
+  useEffect(() => {
+    const root = scrollRef.current;
+    if (!root) return;
+    const imgs = Array.from(root.querySelectorAll('img[data-src]'));
+    if (!imgs.length) return;
+
+    const obs = new IntersectionObserver(
+      (entries) => {
+        for (const ent of entries) {
+          if (ent.isIntersecting) {
+            const img = ent.target;
+            const src = img.dataset.src;
+            if (src) {
+              img.src = src;
+              img.removeAttribute('data-src');
+            }
+            obs.unobserve(img);
+          }
+        }
+      },
+      {
+        root,
+        rootMargin: '300px',
+        threshold: 0.01,
+      },
+    );
+
+    imgs.forEach((i) => obs.observe(i));
+    return () => obs.disconnect();
+  }, [items]);
 
   const open = useCallback(
     async (index) => {
+      if (index < 0 || index >= items.length) return;
       setOpenIndex(index);
-      // build original urls lazily: fetch original signed url for clicked and neighbours
+
+      // предзагрузить соседей
       const needed = [index];
       if (index - 1 >= 0) needed.push(index - 1);
       if (index + 1 < items.length) needed.push(index + 1);
 
-      const urls = [...originalUrls];
+      const fetched = {};
       await Promise.all(
         needed.map(async (i) => {
-          if (!urls[i]) {
-            const key = items[i].key.replace(/^preview\//, 'original/');
-            const res = await fetch(
+          if (originalUrls[i]) {
+            fetched[i] = originalUrls[i];
+            return;
+          }
+          try {
+            const key = items[i].key.replace(/^preview\//, 'original_photo/');
+            const r = await fetch(
               `/api/gallery/original?key=${encodeURIComponent(key)}`,
-              { credentials: 'include' },
+              {
+                credentials: 'include',
+              },
             );
-            const jd = await res.json();
-            urls[i] = jd.url;
+            if (!r.ok) return;
+            const jd = await r.json();
+            if (jd?.url) fetched[i] = jd.url;
+          } catch (e) {
+            // ignore
           }
         }),
       );
-      setOriginalUrls(urls);
+
+      if (Object.keys(fetched).length === 0) return;
+
+      setOriginalUrls((prev) => {
+        const copy = prev.slice();
+        if (copy.length < items.length) copy.length = items.length;
+        for (const k of Object.keys(fetched)) copy[Number(k)] = fetched[k];
+        return copy;
+      });
     },
     [items, originalUrls],
   );
 
-  const Cell = ({ columnIndex, rowIndex, style, data }) => {
-    const idx = rowIndex * data.cols + columnIndex;
-    if (idx >= data.items.length) return null;
-    const it = data.items[idx];
-    return (
-      <div style={{ ...style, padding: 6 }} onClick={() => open(idx)}>
-        <img
-          src={it.url}
-          alt={it.key}
-          style={{
-            width: '100%',
-            height: '100%',
-            objectFit: 'cover',
-            borderRadius: 6,
-          }}
-          loading="lazy"
-        />
-      </div>
-    );
+  const fetchOriginal = useCallback(
+    async (i) => {
+      if (i < 0 || i >= items.length) return null;
+      if (originalUrls[i]) return originalUrls[i];
+      try {
+        const key = items[i].key.replace(/^preview\//, 'original_photo/');
+        const res = await fetch(
+          `/api/gallery/original?key=${encodeURIComponent(key)}`,
+          {
+            credentials: 'include',
+          },
+        );
+        if (!res.ok) return null;
+        const jd = await res.json();
+        if (!jd?.url) return null;
+        setOriginalUrls((prev) => {
+          const copy = prev.slice();
+          if (copy.length < items.length) copy.length = items.length;
+          copy[i] = jd.url;
+          return copy;
+        });
+        return jd.url;
+      } catch {
+        return null;
+      }
+    },
+    [items, originalUrls],
+  );
+
+  // inline styles — чтобы ничего не зависело от внешних файлов
+  const styles = {
+    root: { height: '100vh', display: 'flex', flexDirection: 'column' },
+    header: {
+      padding: 12,
+      display: 'flex',
+      alignItems: 'center',
+      gap: 12,
+      borderBottom: '1px solid #eee',
+    },
+    gridWrap: { flex: 1, overflow: 'auto' },
+    grid: {
+      display: 'grid',
+      gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
+      gap: 12,
+      padding: 12,
+      boxSizing: 'border-box',
+      alignItems: 'stretch',
+    },
+    item: {
+      width: '100%',
+      height: 160,
+      borderRadius: 6,
+      overflow: 'hidden',
+      background: '#f6f6f6',
+      display: 'block',
+      cursor: 'pointer',
+    },
+    img: {
+      width: '100%',
+      height: '100%',
+      objectFit: 'cover',
+      display: 'block',
+    },
+    empty: { padding: 40, textAlign: 'center', color: '#666' },
   };
 
   return (
-    <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
-      <div
-        style={{ padding: 12, display: 'flex', alignItems: 'center', gap: 12 }}
-      >
+    <div style={styles.root}>
+      <div style={styles.header}>
         <Link to="/">← Back</Link>
-        <h2>
+        <h2 style={{ margin: 0 }}>
           {year} / {category}
         </h2>
       </div>
-      <div style={{ flex: 1 }}>
-        <AutoSizer>
-          {({ height, width }) => {
-            const colWidth = 200;
-            const cols = Math.max(1, Math.floor(width / colWidth));
-            const rowHeight = 160;
-            const rows = Math.ceil(items.length / cols);
-            return (
-              <Grid
-                columnCount={cols}
-                columnWidth={Math.floor(width / cols)}
-                height={height}
-                rowCount={rows}
-                rowHeight={rowHeight}
-                width={width}
-                itemData={{ items, cols }}
-              >
-                {Cell}
-              </Grid>
-            );
-          }}
-        </AutoSizer>
+
+      <div style={styles.gridWrap} ref={scrollRef}>
+        {items.length === 0 ? (
+          <div style={styles.empty}>
+            Здесь пока нет превью — либо пустой префикс, либо ошибка загрузки.
+          </div>
+        ) : (
+          <div style={styles.grid}>
+            {items.map((it, idx) => {
+              const key = it.key ?? `${prefix}${idx}`;
+              return (
+                <div
+                  key={key}
+                  style={styles.item}
+                  onClick={() => open(idx)}
+                  role="button"
+                  tabIndex={0}
+                >
+                  {/* data-src — lazy loader подхватит и установит src */}
+                  <img
+                    data-src={it.url}
+                    alt={it.key || `img-${idx}`}
+                    style={styles.img}
+                    loading="lazy"
+                    onError={(e) => {
+                      e.currentTarget.style.opacity = '0.6';
+                      e.currentTarget.style.filter = 'grayscale(1)';
+                    }}
+                  />
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {openIndex >= 0 && (
@@ -110,19 +247,7 @@ export default function GalleryView() {
           items={items}
           originalUrls={originalUrls}
           onClose={() => setOpenIndex(-1)}
-          fetchOriginal={async (i) => {
-            if (originalUrls[i]) return originalUrls[i];
-            const key = items[i].key.replace(/^preview\//, 'original/');
-            const res = await fetch(
-              `/api/gallery/original?key=${encodeURIComponent(key)}`,
-              { credentials: 'include' },
-            );
-            const jd = await res.json();
-            const newArr = [...originalUrls];
-            newArr[i] = jd.url;
-            setOriginalUrls(newArr);
-            return jd.url;
-          }}
+          fetchOriginal={fetchOriginal}
         />
       )}
     </div>

@@ -37,7 +37,6 @@ export default function GalleryList() {
               style={{
                 height: 140,
                 marginTop: 8,
-                background: '#f6f6f6',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',

@@ -88,7 +88,7 @@ export default function Lightbox({
           top: 20,
           right: 20,
           fontSize: 20,
-          color: '#fff',
+          color: '#000000ff',
         }}
       >
         ✕

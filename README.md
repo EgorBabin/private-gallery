@@ -12,8 +12,8 @@
 ### backend         ### frontend
 express             react-router-dom
 express-session     lucide-react
-cors                react-window
-dotenv              react-virtualized-auto-sizer
+cors                
+dotenv              
 pg                  swiper
 express-useragent   react-dom
 connect-pg-simple

@@ -29,23 +29,20 @@ router.get('/cards', async (req, res) => {
         for (const yearPrefix of years) {
             const categories = await listPrefixes(yearPrefix);
             for (const catPrefix of categories) {
-                // получаем первый файл в превью префиксе
-                const list = await listObjects(catPrefix, 1);
-                const firstKey =
-                    list.Contents && list.Contents[0] && list.Contents[0].Key;
-                let thumbnailUrl = null;
-                if (firstKey) {
-                    thumbnailUrl = await getSignedUrlForKey(firstKey, 60 * 5);
-                }
-
                 const year = yearPrefix
                     .replace(PREVIEW_ROOT, '')
                     .replace(/\/$/, '');
                 const category = catPrefix
                     .replace(yearPrefix, '')
                     .replace(/\/$/, '');
-                // prefix для фронта: "2024/trips/"
                 const prefix = `${year}/${category}/`;
+
+                const firstKey = `${PREVIEW_ROOT}${prefix}1.jpg`;
+                let thumbnailUrl = null;
+                if (firstKey) {
+                    thumbnailUrl = await getSignedUrlForKey(firstKey, 60 * 5);
+                }
+
                 cards.push({ year, category, prefix, thumbnailUrl });
             }
         }
