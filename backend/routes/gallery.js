@@ -69,9 +69,32 @@ router.get('/previews', async (req, res) => {
         const data = await listObjects(fullPrefix, limit, continuationToken);
         const contents = data.Contents || [];
 
-        // преобразуем в объекты с индексом и url
+        // Нормализуем префикс — с и без завершающего слэша
+        const prefixNoSlash = fullPrefix.replace(/\/+$/, '');
+        const prefixWithSlash = prefixNoSlash + '/';
+
+        // Отфильтровываем объекты-папки:
+        //  - ключ точный равен префиксу (с/без слэша) — это placeholder папки
+        //  - или ключ заканчивается на '/' — тоже явно папка
+        const fileContents = contents.filter((obj) => {
+            if (!obj || !obj.Key) return false;
+            if (obj.Key === prefixNoSlash || obj.Key === prefixWithSlash) {
+                console.debug(
+                    'Skipping folder placeholder object from S3:',
+                    obj.Key,
+                );
+                return false;
+            }
+            if (obj.Key.endsWith('/')) {
+                console.debug('Skipping directory-like key from S3:', obj.Key);
+                return false;
+            }
+            return true;
+        });
+
+        // преобразуем в объекты с индексом и url (вызываем signed url только для реальных файлов)
         const items = await Promise.all(
-            contents.map(async (obj) => {
+            fileContents.map(async (obj) => {
                 const idx = parseIndexFromKey(obj.Key) ?? 0;
                 const url = await getSignedUrlForKey(obj.Key, 60 * 5);
                 return {

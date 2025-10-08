@@ -150,14 +150,14 @@ app.use('/api/', checkWork);
 app.use('/api/yandex/', yandexRoutes);
 app.use('/api/check-session/', authCheck);
 
-app.use(checkSession()); // вы в безопасности:
-app.use('/api/users/', usersRoutes);
-app.use('/api/gallery', galleryRoutes);
-
-app.use((err, req, res) => {
+app.use((err, req, res, next) => {
     console.error(err.stack);
     res.status(500).json({ error: 'Internal Server Error' });
 });
+
+app.use(checkSession()); // вы в безопасности:
+app.use('/api/users/', usersRoutes);
+app.use('/api/gallery', galleryRoutes);
 
 httpsServer.listen(3000, () => {
     console.log('HTTPS сервер запущен на https://localhost:3000');
