@@ -1,7 +1,7 @@
-// src/pages/Gallery/GalleryView.jsx
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import Lightbox from '@/components/Lightbox/Lightbox'; // оставил твой лайтбокс
+import Lightbox from '@/components/Lightbox/Lightbox';
+import styles from './GalleryList.module.css';
 
 const API = '/api/gallery';
 

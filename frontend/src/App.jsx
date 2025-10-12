@@ -1,7 +1,6 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import useHttpInterceptor from './hooks/useHttpInterceptor';
 // pages
-import Home from '@/pages/Home/Home';
 import GalleryList from '@/pages/Gallery/GalleryList';
 import GalleryView from '@/pages/Gallery/GalleryView';
 

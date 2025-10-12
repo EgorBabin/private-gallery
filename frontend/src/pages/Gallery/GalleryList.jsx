@@ -1,9 +1,26 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
+import { useCheckSession } from '@/hooks/useCheckSession';
+import { useTitle } from '@/hooks/useTitle';
+
+import styles from './GalleryList.module.css';
+
 const API = '/api/gallery';
 
 export default function GalleryList() {
+  const Title = import.meta.env.VITE_NAME;
+  useTitle(Title);
+
+  const { authenticated, loading } = useCheckSession();
+  const navigate = useNavigate();
+  useEffect(() => {
+    if (!loading && !authenticated) {
+      navigate('login');
+    }
+    console.log('session loading:', loading, 'authenticated:', authenticated);
+  }, [loading, authenticated, navigate]);
+
   const [cards, setCards] = useState([]);
   const nav = useNavigate();
 
@@ -15,46 +32,26 @@ export default function GalleryList() {
   }, []);
 
   return (
-    <div style={{ padding: 20 }}>
-      <h1>Galleries</h1>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
+    <>
+      <div className={styles.Galleries}>
         {cards.map((c) => (
           <div
             key={c.prefix}
             onClick={() => nav(`/${c.year}/${c.category}`)}
-            style={{
-              width: 220,
-              cursor: 'pointer',
-              border: '1px solid #ddd',
-              borderRadius: 8,
-              padding: 8,
-            }}
+            className={styles.card}
           >
-            <div style={{ fontWeight: 700 }}>
-              {c.year} / {c.category}
-            </div>
-            <div
-              style={{
-                height: 140,
-                marginTop: 8,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
+            <h1>{c.category}</h1>
+            <div>
               {c.thumbnailUrl ? (
-                <img
-                  src={c.thumbnailUrl}
-                  alt=""
-                  style={{ maxWidth: '100%', maxHeight: '100%' }}
-                />
+                <img src={c.thumbnailUrl} alt="" className={styles.photo} />
               ) : (
                 'No image'
               )}
             </div>
+            <h2>{c.year}</h2>
           </div>
         ))}
       </div>
-    </div>
+    </>
   );
 }
