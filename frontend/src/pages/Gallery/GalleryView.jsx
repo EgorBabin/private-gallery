@@ -200,10 +200,9 @@ export default function GalleryView() {
   return (
     <div style={styles.root}>
       <div style={styles.header}>
-        <Link to="/">← Back</Link>
-        <h2 style={{ margin: 0 }}>
+        <h1 style={{ margin: 0 }}>
           {year} / {category}
-        </h2>
+        </h1>
       </div>
 
       <div style={styles.gridWrap} ref={scrollRef}>

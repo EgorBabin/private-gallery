@@ -5,8 +5,6 @@ cert.pem
 key.pem
 
 # FRONTEND
-# background
-pic.jpg
 
 # Logs
 logs

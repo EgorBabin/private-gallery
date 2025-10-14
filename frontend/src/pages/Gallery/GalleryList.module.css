@@ -1,15 +1,10 @@
 .Galleries {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(275px, 1fr));
-    grid-gap: 1%;
-    margin: 2%;
-    margin-bottom: 2%;
-}
-
-@media (min-width: 1100px) { /* 275px * 4 = 1100px */
-    .Galleries {
-        grid-template-columns: repeat(4, minmax(275px, 1fr));
-    }
+    max-width: calc(275px * 4 + 20px * 3 + 40px);
+    margin: 0 auto;
+    padding: 1%;
+    margin-bottom: 1%;
 }
 
 .card {
@@ -20,6 +15,7 @@
     overflow: hidden;
     box-shadow: 0 10px 20px rgba(0, 0, 0, 0.25);
     padding: 20px;
+    margin: 2%;
     border-radius: 10px;
     transition: 0.3s;
 }
@@ -27,7 +23,7 @@
 @media (any-hover: hover){ 
     .card:hover {
         transform: scale(1.035);
-        box-shadow: 0 15px 30px rgba(0, 0, 0, 0.9);
+        box-shadow: 0 15px 30px rgba(0, 0, 0, 0.5);
     }
     .card:hover .photo {
         height: 100%;
@@ -36,7 +32,7 @@
 
 @media (any-hover: none){ 
     .card:active {
-        box-shadow: 0 15px 30px rgba(0, 0, 0, 0.9);
+        box-shadow: 0 15px 30px rgba(0, 0, 0, 0.5);
     }
     .card:active .photo {
         height: 100%;

@@ -22,7 +22,7 @@ function AppInner() {
       <Routes>
         <Route path="/" element={<GalleryList />} />
         <Route path="/:year/:category" element={<GalleryView />} />
-        <Route path="/users" element={<Users />} />
+        <Route path="/admin" element={<Users />} />
         <Route path="/login" element={<Login />} />
         <Route path="/auth" element={<Login />} />
         <Route path="*" element={<NotFound />} />
