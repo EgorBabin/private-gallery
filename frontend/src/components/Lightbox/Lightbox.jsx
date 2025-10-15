@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { Swiper, SwiperSlide } from 'swiper/react';
+import { Navigation, Keyboard, Mousewheel } from 'swiper/modules';
 import 'swiper/css';
 import 'swiper/css/navigation';
 
-// props: items (previews), startIndex, onClose, fetchOriginal(index) -> url
+import styles from './Lightbox.module.css';
+
 export default function Lightbox({
   items,
   startIndex,
@@ -18,7 +20,6 @@ export default function Lightbox({
   }, [startIndex]);
 
   useEffect(() => {
-    // preload current and neighbors
     (async () => {
       await Promise.all(
         [current, current - 1, current + 1].map(async (i) => {
@@ -36,61 +37,30 @@ export default function Lightbox({
   }, [current]);
 
   return (
-    <div
-      style={{
-        position: 'fixed',
-        inset: 0,
-        background: 'rgba(0,0,0,0.9)',
-        zIndex: 9999,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-      }}
-      onClick={onClose}
-    >
-      <div
-        style={{ width: '90%', height: '90%' }}
-        onClick={(e) => e.stopPropagation()}
-      >
+    <div className={styles.overlay} onClick={onClose}>
+      <div className={styles.content} onClick={(e) => e.stopPropagation()}>
         <Swiper
           initialSlide={startIndex}
           onSlideChange={(s) => setCurrent(s.activeIndex)}
+          modules={[Navigation, Keyboard, Mousewheel]}
           navigation
+          mousewheel={true}
           keyboard={{ enabled: true }}
           spaceBetween={10}
+          className={styles.swiper}
         >
           {items.map((it, i) => (
-            <SwiperSlide
-              key={it.key}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
+            <SwiperSlide key={it.key} className={styles.slide}>
               <img
                 src={origUrls[i] || it.url}
                 alt={it.key}
-                style={{
-                  maxWidth: '100%',
-                  maxHeight: '100%',
-                  objectFit: 'contain',
-                }}
+                className={styles.image}
               />
             </SwiperSlide>
           ))}
         </Swiper>
       </div>
-      <button
-        onClick={onClose}
-        style={{
-          position: 'absolute',
-          top: 20,
-          right: 20,
-          fontSize: 20,
-          color: '#000000ff',
-        }}
-      >
+      <button onClick={onClose} className={styles.close}>
         ✕
       </button>
     </div>

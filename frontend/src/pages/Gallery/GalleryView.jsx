@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import Lightbox from '@/components/Lightbox/Lightbox';
-import styles from './GalleryList.module.css';
+import styles from './GalleryView.module.css';
 
 const API = '/api/gallery';
 
@@ -60,26 +60,19 @@ export default function GalleryView() {
     const imgs = Array.from(root.querySelectorAll('img[data-src]'));
     if (!imgs.length) return;
 
-    const obs = new IntersectionObserver(
-      (entries) => {
-        for (const ent of entries) {
-          if (ent.isIntersecting) {
-            const img = ent.target;
-            const src = img.dataset.src;
-            if (src) {
-              img.src = src;
-              img.removeAttribute('data-src');
-            }
-            obs.unobserve(img);
+    const obs = new IntersectionObserver((entries) => {
+      for (const ent of entries) {
+        if (ent.isIntersecting) {
+          const img = ent.target;
+          const src = img.dataset.src;
+          if (src) {
+            img.src = src;
+            img.removeAttribute('data-src');
           }
+          obs.unobserve(img);
         }
-      },
-      {
-        root,
-        rootMargin: '300px',
-        threshold: 0.01,
-      },
-    );
+      }
+    });
 
     imgs.forEach((i) => obs.observe(i));
     return () => obs.disconnect();
@@ -113,6 +106,7 @@ export default function GalleryView() {
             if (!r.ok) return;
             const jd = await r.json();
             if (jd?.url) fetched[i] = jd.url;
+            // eslint-disable-next-line no-unused-vars
           } catch (e) {
             // ignore
           }
@@ -160,73 +154,33 @@ export default function GalleryView() {
     [items, originalUrls],
   );
 
-  // inline styles — чтобы ничего не зависело от внешних файлов
-  const styles = {
-    root: { height: '100vh', display: 'flex', flexDirection: 'column' },
-    header: {
-      padding: 12,
-      display: 'flex',
-      alignItems: 'center',
-      gap: 12,
-      borderBottom: '1px solid #eee',
-    },
-    gridWrap: { flex: 1, overflow: 'auto' },
-    grid: {
-      display: 'grid',
-      gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
-      gap: 12,
-      padding: 12,
-      boxSizing: 'border-box',
-      alignItems: 'stretch',
-    },
-    item: {
-      width: '100%',
-      height: 160,
-      borderRadius: 6,
-      overflow: 'hidden',
-      background: '#f6f6f6',
-      display: 'block',
-      cursor: 'pointer',
-    },
-    img: {
-      width: '100%',
-      height: '100%',
-      objectFit: 'cover',
-      display: 'block',
-    },
-    empty: { padding: 40, textAlign: 'center', color: '#666' },
-  };
-
   return (
-    <div style={styles.root}>
-      <div style={styles.header}>
-        <h1 style={{ margin: 0 }}>
-          {year} / {category}
-        </h1>
-      </div>
+    <>
+      <h1>
+        {year} / {category}
+      </h1>
 
-      <div style={styles.gridWrap} ref={scrollRef}>
+      <div className={styles.gridWrap} ref={scrollRef}>
         {items.length === 0 ? (
-          <div style={styles.empty}>
+          <div className={styles.empty}>
             Здесь пока нет превью — либо пустой префикс, либо ошибка загрузки.
           </div>
         ) : (
-          <div style={styles.grid}>
+          <div className={styles.grid}>
             {items.map((it, idx) => {
               const key = it.key ?? `${prefix}${idx}`;
               return (
                 <div
                   key={key}
-                  style={styles.item}
+                  className={styles.item}
                   onClick={() => open(idx)}
                   role="button"
                   tabIndex={0}
                 >
-                  {/* data-src — lazy loader подхватит и установит src */}
                   <img
                     data-src={it.url}
                     alt={it.key || `img-${idx}`}
-                    style={styles.img}
+                    className={styles.img}
                     loading="lazy"
                     onError={(e) => {
                       e.currentTarget.style.opacity = '0.6';
@@ -249,6 +203,6 @@ export default function GalleryView() {
           fetchOriginal={fetchOriginal}
         />
       )}
-    </div>
+    </>
   );
 }

@@ -1,0 +1,67 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  -webkit-backdrop-filter: blur(15px);
+  backdrop-filter: blur(15px);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.content {
+  width: 90%;
+  height: 90%;
+}
+
+.slide {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.image {
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: 6px;
+  object-fit: contain;
+}
+
+.close {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  font-size: 20px;
+  color: #000;
+  z-index: 1;
+  aspect-ratio: 1 / 1;
+  border-radius: 15px;
+  background: white;
+  border: none;
+  cursor: pointer;
+}
+
+.swiper {
+  overflow: visible;
+}
+
+:global(.swiper-button-next),
+:global(.swiper-button-prev) {
+  color: white;
+  transition: color 0.25s;
+}
+
+@media (any-hover: hover) {
+  :global(.swiper-button-next:hover),
+  :global(.swiper-button-prev:hover) {
+    color: #00bfff;
+  }
+}
+
+@media (any-hover: none) {
+  :global(.swiper-button-next:active),
+  :global(.swiper-button-prev:active) {
+    color: #00bfff;
+  }
+}
