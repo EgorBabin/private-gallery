@@ -10,18 +10,37 @@
   justify-content: center;
 }
 
+.overlay,
 .swiper,
 .slide,
-.image,
-.overlay {
+.image {
   touch-action: auto !important;
 }
-
 
 .container {
   width: 92%;
   height: 92%;
   position: relative;
+}
+
+.slide {
+  flex: 0 0 auto;
+  width: 80%;
+  max-width: 1000px;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+}
+
+.image {
+  width: 100%;
+  height: auto;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 6px;
+  transition: transform 160ms ease;
 }
 
 .swiper {
@@ -34,24 +53,6 @@
   align-items: center;
 }
 
-.slide {
-  width: 78%;
-  height: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-sizing: border-box;
-}
-
-.image {
-  max-width: 100%;
-  max-height: 100%;
-  object-fit: contain;
-  user-select: none;
-  -webkit-user-drag: none;
-  border-radius: 6px;
-  transition: transform 160ms ease;
-}
 
 .close {
   position: absolute;
@@ -78,22 +79,17 @@
   transform: translateY(-50%);
   height: 100dvh;
   width: 5%;
-  background: rgba(0, 0, 0, 0);
+  background: transparent;
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 100;
   border-radius: 0;
+  color: rgba(255, 255, 255, 0);
   transition:
+    opacity 180ms ease,
     background 180ms ease,
     color 180ms ease;
-  color: rgba(
-    255,
-    255,
-    255,
-    0
-  );
-  pointer-events: none;
 }
 
 :global(.swiper-button-prev) {
@@ -104,32 +100,35 @@
 }
 
 @media (any-hover: hover) {
-  :global(.swiper-button-prev:hover),
-  :global(.swiper-button-next:hover) {
-    background: rgba(255, 255, 255, 0.04);
-    color: rgba(255, 255, 255, 0.2);
+  .overlay:hover :global(.swiper-button-prev:hover),
+  .overlay:hover :global(.swiper-button-next:hover) {
+    opacity: 1;
+    color: rgba(255, 255, 255, 0.5);
+    background: rgba(0, 0, 0, 0.1);
   }
 }
 
 @media (any-hover: none) {
-  :global(.swiper-button-prev:active),
-  :global(.swiper-button-next:active) {
-    background: rgba(255, 255, 255, 0.06);
-    color: rgba(255, 255, 255, 0.2);
+  .overlay:active :global(.swiper-button-prev:hover),
+  .overlay:active :global(.swiper-button-next:hover) {
+    opacity: 1;
+    color: rgba(255, 255, 255, 0.5);
+    background: rgba(0, 0, 0, 0.1);
   }
+}
+
+:global(.swiper-button-prev)::after,
+:global(.swiper-button-next)::after {
+  pointer-events: auto;
 }
 
 @media (max-width: 900px) {
   .slide {
     width: 90%;
   }
+
   :global(.swiper-button-prev),
   :global(.swiper-button-next) {
     width: 10%;
   }
-}
-
-:global(.swiper-button-prev)::after,
-:global(.swiper-button-next)::after {
-  pointer-events: auto; /* разрешаем клики только по иконке */
 }
