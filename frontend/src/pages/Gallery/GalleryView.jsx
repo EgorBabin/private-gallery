@@ -162,8 +162,16 @@ export default function GalleryView() {
 
       <div className={styles.gridWrap} ref={scrollRef}>
         {items.length === 0 ? (
-          <div className={styles.empty}>
-            Здесь пока нет превью — либо пустой префикс, либо ошибка загрузки.
+          <div className={styles.grid}>
+            {Array.from({ length: 12 }).map((_, i) => (
+              <div
+                key={`skeleton-${i}`}
+                className={`${styles.item} ${styles.skeleton}`}
+                aria-hidden="true"
+              >
+                <div className={styles.skeletonPhoto} />
+              </div>
+            ))}
           </div>
         ) : (
           <div className={styles.grid}>

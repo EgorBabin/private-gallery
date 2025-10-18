@@ -62,3 +62,52 @@
   text-shadow: 0px 0px 5px rgba(0, 0, 0, 0.4);
   font-weight: normal;
 }
+
+.skeleton {
+  background: #343434;
+  color: transrgb(32, 32, 32);
+  position: relative;
+  overflow: hidden;
+}
+
+/* Shimmer-анимация */
+.skeleton::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -150px;
+  height: 100%;
+  width: 150px;
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0) 0%,
+    rgba(255, 255, 255, 0.2) 50%,
+    rgba(255, 255, 255, 0) 100%
+  );
+  animation: skeleton-shimmer 1.2s infinite;
+}
+
+@keyframes skeleton-shimmer {
+  0% {
+    left: -150px;
+  }
+  100% {
+    left: 100%;
+  }
+}
+
+.skeletonTitle {
+  width: 60%;
+  height: 18px;
+  background: #d3d3d3;
+  border-radius: 4px;
+  margin: 6px 0;
+}
+
+.skeletonYear {
+  width: 40%;
+  height: 14px;
+  background: #acacac;
+  border-radius: 4px;
+  margin-top: auto;
+}

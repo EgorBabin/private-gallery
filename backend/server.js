@@ -31,7 +31,7 @@ app.use(helmet());
 
 const limiter = rateLimit({
     windowMs: 15 * 60 * 1000,
-    limit: 500,
+    limit: 5000,
     standardHeaders: 'draft-8',
     legacyHeaders: false,
     ipv6Subnet: 56,
