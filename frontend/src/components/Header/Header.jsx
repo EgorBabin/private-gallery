@@ -1,21 +1,23 @@
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import styles from './Header.module.css';
-import { Film, LogIn, Users } from 'lucide-react';
+import { Film, Users, GalleryVertical } from 'lucide-react';
 import { useVibration } from '@/hooks/useVibration';
 
 export default function Header() {
   const vibrate = useVibration();
+  const location = useLocation();
+  const newSearch = location.search ? `${location.search}&edit` : '?edit';
   return (
     <header className={styles.header}>
       <nav className={styles.nav}>
         <Link to="/" onClick={() => vibrate('click')}>
           <Film strokeWidth={2} />
         </Link>
-        {/* <a href="/api/hello" onClick={() => vibrate('click')}>
-          <LayoutDashboard />
-        </a> */}
-        <Link to="/login" onClick={() => vibrate('click')}>
-          <LogIn />
+        <Link
+          to={`${location.pathname}${newSearch}`}
+          onClick={() => vibrate('click')}
+        >
+          <GalleryVertical />
         </Link>
         <Link to="/admin" onClick={() => vibrate('click')}>
           <Users />

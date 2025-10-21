@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import Lightbox from '@/components/Lightbox/Lightbox';
+import { useTitle } from '@/hooks/useTitle';
 import styles from './GalleryView.module.css';
 
 const API = '/api/gallery';
@@ -12,6 +13,8 @@ export default function GalleryView() {
   const [openIndex, setOpenIndex] = useState(-1);
   const [originalUrls, setOriginalUrls] = useState([]);
   const scrollRef = useRef(null);
+
+  useTitle(category);
 
   // fetch previews
   useEffect(() => {
