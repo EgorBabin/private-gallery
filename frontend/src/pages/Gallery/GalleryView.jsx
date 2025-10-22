@@ -14,7 +14,7 @@ export default function GalleryView() {
   const [originalUrls, setOriginalUrls] = useState([]);
   const scrollRef = useRef(null);
 
-  useTitle(category);
+  useTitle(`${year} ${category}`);
 
   // fetch previews
   useEffect(() => {

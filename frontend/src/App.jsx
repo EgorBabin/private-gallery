@@ -3,6 +3,7 @@ import useHttpInterceptor from './hooks/useHttpInterceptor';
 // pages
 import GalleryList from '@/pages/Gallery/GalleryList';
 import GalleryView from '@/pages/Gallery/GalleryView';
+import GalleryEdit from '@/pages/Gallery/GalleryEdit';
 
 import Users from '@/pages/Admin/Users';
 import Login from '@/pages/Login/Login';
@@ -21,9 +22,9 @@ function AppInner() {
 
       <Routes>
         <Route path="/" element={<GalleryList />} />
-        <Route path="/edit" element={<GalleryList />} />
+        <Route path="/edit" element={<GalleryList />} /> {/*!!!!!*/}
         <Route path="/:year/:category" element={<GalleryView />} />
-        <Route path="/edit/:year/:category" element={<GalleryView />} />
+        <Route path="/edit/:year/:category" element={<GalleryEdit />} />
         <Route path="/admin" element={<Users />} />
         <Route path="/login" element={<Login />} />
         <Route path="/auth" element={<Login />} />

@@ -23,7 +23,8 @@ cookie-parser
 express-rate-limit
 @aws-sdk/client-s3
 @aws-sdk/s3-request-presigner
-🕰️ sharp
+sharp
+multer
 
 eslint
 prettier

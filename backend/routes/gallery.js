@@ -77,7 +77,9 @@ router.get('/previews', async (req, res) => {
         //  - ключ точный равен префиксу (с/без слэша) — это placeholder папки
         //  - или ключ заканчивается на '/' — тоже явно папка
         const fileContents = contents.filter((obj) => {
-            if (!obj || !obj.Key) return false;
+            if (!obj || !obj.Key) {
+                return false;
+            }
             if (obj.Key === prefixNoSlash || obj.Key === prefixWithSlash) {
                 console.debug(
                     'Skipping folder placeholder object from S3:',

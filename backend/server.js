@@ -24,6 +24,7 @@ import { logAction } from './utils/logger.js';
 import checkSession from './utils/checkSession.js';
 
 import galleryRoutes from './routes/gallery.js';
+import galleryEditRoutes from './routes/galleryEdit.js';
 
 const app = express();
 
@@ -158,6 +159,7 @@ app.use((err, req, res, next) => {
 app.use(checkSession()); // вы в безопасности:
 app.use('/api/users/', usersRoutes);
 app.use('/api/gallery', galleryRoutes);
+app.use('/api/gallery', galleryEditRoutes);
 
 httpsServer.listen(3000, () => {
     console.log('HTTPS сервер запущен на https://localhost:3000');

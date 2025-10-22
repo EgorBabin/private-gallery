@@ -2,6 +2,7 @@ import {
     S3Client,
     ListObjectsV2Command,
     GetObjectCommand,
+    PutObjectCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl as awsGetSignedUrl } from '@aws-sdk/s3-request-presigner';
 
@@ -41,6 +42,35 @@ export async function listPrefixes(prefix = '') {
 export async function getSignedUrlForKey(key, expiresInSec = 300) {
     const cmd = new GetObjectCommand({ Bucket: BUCKET, Key: key });
     return awsGetSignedUrl(s3, cmd, { expiresIn: expiresInSec });
+}
+
+export async function uploadToS3(buffer, key, contentType = 'image/jpeg') {
+    const cmd = new PutObjectCommand({
+        Bucket: BUCKET,
+        Key: key,
+        Body: buffer,
+        ContentType: contentType,
+    });
+    await s3.send(cmd);
+}
+
+export async function getLastImageNumber(prefix) {
+    const cmd = new ListObjectsV2Command({
+        Bucket: BUCKET,
+        Prefix: prefix,
+    });
+    const data = await s3.send(cmd);
+
+    if (!data.Contents?.length) {
+        return 0;
+    }
+
+    const numbers = data.Contents.map((obj) => {
+        const match = obj.Key.match(/(\d+)\.jpg$/);
+        return match ? parseInt(match[1]) : 0;
+    }).filter(Boolean);
+
+    return numbers.length ? Math.max(...numbers) : 0;
 }
 
 export default s3;

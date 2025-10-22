@@ -27,6 +27,7 @@
         "express-session": "1.18.1",
         "express-useragent": "1.0.15",
         "helmet": "8.1.0",
+        "multer": "^2.0.2",
         "pg": "8.16.3",
         "sharp": "^0.34.4"
     },
