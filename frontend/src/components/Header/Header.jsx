@@ -6,17 +6,19 @@ import { useVibration } from '@/hooks/useVibration';
 export default function Header() {
   const vibrate = useVibration();
   const location = useLocation();
-  const newSearch = location.search ? `${location.search}&edit` : '?edit';
+
+  const isEditPath = location.pathname.startsWith('/edit/');
+  const editPath = isEditPath
+    ? location.pathname.replace('/edit/', '/')
+    : `/edit${location.pathname}`;
+
   return (
     <header className={styles.header}>
       <nav className={styles.nav}>
         <Link to="/" onClick={() => vibrate('click')}>
           <Film strokeWidth={2} />
         </Link>
-        <Link
-          to={`${location.pathname}${newSearch}`}
-          onClick={() => vibrate('click')}
-        >
+        <Link to={editPath} onClick={() => vibrate('click')}>
           <GalleryVertical />
         </Link>
         <Link to="/admin" onClick={() => vibrate('click')}>
