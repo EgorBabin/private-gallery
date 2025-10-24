@@ -12,7 +12,7 @@ router.post('/upload', upload.single('image'), async (req, res) => {
         const buffer = req.file.buffer;
 
         const prefix = `preview/${path}/`;
-        const nextNumber = await getLastImageNumber(prefix);
+        const nextNumber = (await getLastImageNumber(prefix)) + 1;
         const filename = `${nextNumber}.jpg`;
 
         const previewBuffer = await sharp(buffer)

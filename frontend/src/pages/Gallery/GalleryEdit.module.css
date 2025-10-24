@@ -1,0 +1,14 @@
+.main {
+    margin-bottom: 10dvh;
+}
+
+.container {
+  height: 90dvh;
+}
+
+.img {
+  height: 100%;
+  width: 100%;
+  max-width: 1200px;
+  display: block;
+}

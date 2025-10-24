@@ -5,7 +5,7 @@ export function useCsrfFetch() {
 
   useEffect(() => {
     fetch('/api/csrf-token', { credentials: 'include' })
-      .then(r => r.json())
+      .then((r) => r.json())
       .then(({ csrfToken }) => setToken(csrfToken))
       .catch(console.error);
   }, []);
@@ -22,7 +22,8 @@ export function useCsrfFetch() {
         headers['X-CSRF-Token'] = token;
 
         if (!isFormData) {
-          headers['Content-Type'] = headers['Content-Type'] || 'application/json';
+          headers['Content-Type'] =
+            headers['Content-Type'] || 'application/json';
         }
       }
 

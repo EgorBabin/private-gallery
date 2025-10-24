@@ -190,6 +190,7 @@ export default function GalleryView() {
                 >
                   <img
                     data-src={it.url}
+                    id={idx}
                     alt={it.key || `img-${idx}`}
                     className={styles.img}
                     loading="lazy"

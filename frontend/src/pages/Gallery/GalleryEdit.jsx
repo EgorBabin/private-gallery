@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useCsrfFetch } from '@/hooks/useCsrfFetch';
+import styles from './GalleryEdit.module.css';
 
 export default function UploadForm() {
   const csrfFetch = useCsrfFetch();
@@ -35,7 +36,19 @@ export default function UploadForm() {
   };
 
   return (
-    <div>
+    <div className={styles.main}>
+      {file ? (
+        <div className={styles.container}>
+          <img
+            src={URL.createObjectURL(file)}
+            alt="preview"
+            className={styles.img}
+          />
+        </div>
+      ) : (
+        <div className={styles.item}>Прикрепите фотографию</div>
+      )}
+
       <input
         type="file"
         accept="image/*"

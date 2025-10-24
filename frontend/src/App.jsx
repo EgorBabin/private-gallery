@@ -11,7 +11,6 @@ import Login from '@/pages/Login/Login';
 import NotFound from '@/pages/404/404';
 // components
 import Header from '@/components/Header/Header';
-import Footer from '@/components/Footer/Footer';
 
 function AppInner() {
   useHttpInterceptor();
@@ -30,8 +29,6 @@ function AppInner() {
         <Route path="/auth" element={<Login />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
-
-      <Footer />
     </>
   );
 }
