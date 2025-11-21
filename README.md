@@ -12,7 +12,7 @@
 ### backend         ### frontend
 express             react-router-dom
 express-session     lucide-react
-cors                
+cors                three
 dotenv              
 pg                  swiper
 express-useragent   react-dom
