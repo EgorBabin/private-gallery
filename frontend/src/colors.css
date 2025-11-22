@@ -5,7 +5,7 @@
   --color-text-primary: rgb(255, 255, 255); /* Текст главный */
   --color-text-secondary: rgb(36, 36, 36); /* Текст второстепенный */
   --color-text-secondary: ; /* Текст-подсказка / плейсхолдер */
-  --color-background-default: rgb(28, 28, 28); /* Фон страницы */
+  --color-background-default: rgb(20, 20, 20); /* Фон страницы */
   --color-background-surface: rgb(32, 35, 42); /* Фон контейнeра / карточки */
   --color-border: ; /* Граница / разделитель */
 

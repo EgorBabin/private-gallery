@@ -93,7 +93,7 @@
   box-sizing: border-box;
 }
 
-.formWrap button {
+button {
   padding: 0.4rem 0.8rem;
   border-radius: 0.7rem;
   background-color: var(--color-users-danger-hover);
@@ -103,6 +103,6 @@
   transition: background-color 0.2s;
 }
 
-.formWrap button:hover {
+button:hover {
   background-color: var(--color-users-danger);
 }

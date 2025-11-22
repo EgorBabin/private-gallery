@@ -17,6 +17,8 @@ import useragent from 'express-useragent';
 
 import checkWork from './routes/hello.js';
 import usersRoutes from './routes/users.js';
+import invitesRouters from './routes/invites.js';
+import webauthnRouters from './routes/webauthn.js';
 import yandexRoutes from './routes/yandex.js';
 import authCheck from './utils/authCheck.js';
 import { logAction } from './utils/logger.js';
@@ -148,6 +150,7 @@ app.use(async (req, res, next) => {
 
 // Подключаем роуты
 app.use('/api/', checkWork);
+app.use('/api/webauthn', webauthnRouters);
 app.use('/api/yandex/', yandexRoutes);
 app.use('/api/check-session/', authCheck);
 
@@ -160,6 +163,7 @@ app.use(checkSession()); // вы в безопасности:
 app.use('/api/users/', usersRoutes);
 app.use('/api/gallery', galleryRoutes);
 app.use('/api/gallery', galleryEditRoutes);
+app.use('/api/invites', invitesRouters);
 
 httpsServer.listen(3000, () => {
     console.log('HTTPS сервер запущен на https://localhost:3000');
