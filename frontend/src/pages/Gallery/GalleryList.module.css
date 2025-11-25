@@ -18,6 +18,7 @@
   margin: 2%;
   border-radius: 10px;
   transition: 0.3s;
+  text-transform: capitalize;
 }
 
 @media (any-hover: hover) {

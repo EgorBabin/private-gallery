@@ -25,6 +25,10 @@
   display: block;
 }
 
+h1 {
+  text-transform: capitalize;
+}
+
 .skeleton {
   position: relative;
   background: #343434;

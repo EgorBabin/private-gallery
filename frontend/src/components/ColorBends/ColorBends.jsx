@@ -107,9 +107,9 @@ export default function ColorBends({
   scale = 1,
   frequency = 1,
   warpStrength = 1,
-  mouseInfluence = 1,
-  parallax = 0.5,
-  noise = 0.1,
+  mouseInfluence = 0,
+  parallax = 0,
+  noise = 0,
 }) {
   const containerRef = useRef(null);
   const rendererRef = useRef(null);

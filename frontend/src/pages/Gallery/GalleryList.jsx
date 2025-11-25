@@ -1,12 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-
 import { useCheckSession } from '@/hooks/useCheckSession';
 import { useTitle } from '@/hooks/useTitle';
-
 import styles from './GalleryList.module.css';
 
 const API = '/api/gallery';
+const LS_KEY = 'gallery_cards_cache';
 
 export default function GalleryList() {
   const Title = import.meta.env.VITE_NAME;
@@ -25,13 +24,32 @@ export default function GalleryList() {
   const nav = useNavigate();
 
   useEffect(() => {
+    const cached = localStorage.getItem(LS_KEY);
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed.cards)) setCards(parsed.cards);
+      } catch (_) {}
+    }
+
     fetch(`${API}/cards`, { credentials: 'include' })
       .then((r) => r.json())
-      .then((d) => setCards(d.cards || []))
-      .catch(() => {
-        setCards([]);
-      });
+      .then((d) => {
+        const fresh = d.cards || [];
+
+        setCards(fresh);
+        localStorage.setItem(
+          LS_KEY,
+          JSON.stringify({ cards: fresh.map(stripUrls) }),
+        );
+      })
+      .catch(() => {});
   }, []);
+
+  function stripUrls(card) {
+    const { thumbnailUrl, ...rest } = card;
+    return rest;
+  }
 
   const skeletonCount = 6;
   const skeletonCards = Array.from({ length: skeletonCount }, (_, i) => (
@@ -58,10 +76,8 @@ export default function GalleryList() {
             >
               <h1>{c.category}</h1>
               <div>
-                {c.thumbnailUrl ? (
+                {c.thumbnailUrl && (
                   <img src={c.thumbnailUrl} alt="" className={styles.photo} />
-                ) : (
-                  'No image'
                 )}
               </div>
               <h2>{c.year}</h2>

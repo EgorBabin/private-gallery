@@ -15,7 +15,6 @@ import GalleryEdit from '@/pages/Gallery/GalleryEdit';
 
 import Users from '@/pages/Admin/Users';
 import Login from '@/pages/Login/Login';
-import Passkey from '@/pages/Login/Passkey';
 
 import NotFound from '@/pages/404/404';
 // components
@@ -31,17 +30,7 @@ function AppInner() {
     <>
       {!hideBackground && (
         <div className="color-bends-container">
-          <ColorBends
-            rotation={0}
-            speed={0.2}
-            scale={1}
-            frequency={1}
-            warpStrength={1}
-            mouseInfluence={0}
-            parallax={0}
-            noise={0}
-            transparent
-          />
+          <ColorBends />
         </div>
       )}
 
@@ -55,7 +44,6 @@ function AppInner() {
         <Route path="/admin" element={<Users />} />
         <Route path="/login" element={<Login />} />
         <Route path="/auth" element={<Login />} />
-        <Route path="/passkey" element={<Passkey />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
     </>

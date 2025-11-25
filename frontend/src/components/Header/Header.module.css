@@ -33,6 +33,7 @@
 header svg {
   width: auto;
   height: auto;
+  transition: scale 100ms;
 }
 
 .nav a {
@@ -40,6 +41,10 @@ header svg {
   padding: 0 0.5rem;
   text-decoration: none;
   color: inherit;
+}
+
+.nav svg:active {
+  scale: 1.5;
 }
 
 .nav a:not(:last-child)::after {
