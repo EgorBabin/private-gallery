@@ -1,0 +1,75 @@
+services:
+  postgres:
+    image: postgres:18.1
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${PG_DATABASE}
+      POSTGRES_USER: ${PG_USER}
+      POSTGRES_PASSWORD: ${PG_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d:ro  # опционально init sql
+    networks:
+      - gallery-net
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      args:
+        NODE_ENV: production
+    env_file: 
+      - .env
+    # на деве можно монтировать исходники; в проде не надо
+    volumes:
+      - ./backend:/app:cached
+      - ./backend/.env:/app/.env:ro
+    ports:
+      - "3000:3000"
+    depends_on:
+      - postgres
+    networks:
+      - gallery-net
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_BUILD: "true"
+    env_file:
+      - .env
+    volumes:
+      - ./frontend:/app:cached
+      - ./frontend/.env:/app/.env:ro
+    # не выставляем порт: nginx будет отдавать статику
+    networks:
+      - gallery-net
+
+  nginx:
+    build:
+      context: ./nginx
+      dockerfile: Dockerfile
+      args:
+        SERVER_NAME: ${SERVER_NAME:-localhost}
+    env_file:
+      - .env
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./frontend/dist:/usr/share/nginx/html:ro   # готовая сборка фронтенда
+      - ./SSL:/etc/nginx/ssl:ro                   # если есть certs
+    depends_on:
+      - frontend
+      - backend
+    networks:
+      - gallery-net
+
+volumes:
+  pgdata:
+
+networks:
+  gallery-net:
+    driver: bridge
