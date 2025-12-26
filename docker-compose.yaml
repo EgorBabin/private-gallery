@@ -1,4 +1,5 @@
 services:
+
   postgres:
     image: postgres:18.1
     restart: unless-stopped
@@ -20,10 +21,6 @@ services:
         NODE_ENV: production
     env_file: 
       - .env
-    # на деве можно монтировать исходники; в проде не надо
-    volumes:
-      - ./backend:/app:cached
-      - ./backend/.env:/app/.env:ro
     ports:
       - "3000:3000"
     depends_on:
@@ -31,25 +28,10 @@ services:
     networks:
       - gallery-net
 
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-      args:
-        VITE_BUILD: "true"
-    env_file:
-      - .env
-    volumes:
-      - ./frontend:/app:cached
-      - ./frontend/.env:/app/.env:ro
-    # не выставляем порт: nginx будет отдавать статику
-    networks:
-      - gallery-net
-
   nginx:
     build:
-      context: ./nginx
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./nginx/Dockerfile
       args:
         SERVER_NAME: ${SERVER_NAME:-localhost}
     env_file:
@@ -59,10 +41,7 @@ services:
       - "443:443"
     volumes:
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
-      - ./frontend/dist:/usr/share/nginx/html:ro   # готовая сборка фронтенда
-      - ./SSL:/etc/nginx/ssl:ro                   # если есть certs
     depends_on:
-      - frontend
       - backend
     networks:
       - gallery-net
