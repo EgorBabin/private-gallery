@@ -1,5 +1,4 @@
 import express from 'express';
-import rateLimit from 'express-rate-limit';
 import {
     listPrefixes,
     listObjects,
@@ -11,14 +10,6 @@ const router = express.Router();
 
 const PREVIEW_ROOT = 'preview/';
 const ORIGINAL_ROOT = 'original_photo/';
-
-const galleryLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000,
-    max: 200,
-    standardHeaders: 'draft-8',
-    legacyHeaders: false,
-});
-router.use(galleryLimiter);
 
 // GET /api/gallery/cards
 router.get('/cards', async (req, res) => {

@@ -2,10 +2,7 @@ import 'dotenv/config';
 import express from 'express';
 import session from 'express-session';
 
-import https from 'https';
-import fs from 'fs';
 import helmet from 'helmet';
-import { rateLimit } from 'express-rate-limit';
 
 import cookieParser from 'cookie-parser';
 import csurf from 'csurf';
@@ -28,27 +25,11 @@ import galleryEditRoutes from './routes/galleryEdit.js';
 
 const app = express();
 
+app.set('trust proxy', 1);
+
 app.use(helmet());
 
-const limiter = rateLimit({
-    windowMs: 15 * 60 * 1000,
-    limit: 5000,
-    standardHeaders: 'draft-8',
-    legacyHeaders: false,
-    ipv6Subnet: 56,
-});
-
-app.use(limiter);
-
 app.use(cookieParser());
-
-const httpsServer = https.createServer(
-    {
-        key: fs.readFileSync('../SSL/key.pem'),
-        cert: fs.readFileSync('../SSL/cert.pem'),
-    },
-    app,
-);
 
 // for local use
 app.use(
@@ -117,8 +98,10 @@ app.use(useragent.express());
 app.use(async (req, res, next) => {
     console.log('Сессия:', req.session);
     if (req.session.user) {
-        const currentIp =
-            req.headers['x-forwarded-for'] || req.connection.remoteAddress;
+        const currentIp = (req.headers['x-forwarded-for'] || req.ip || '')
+            .toString()
+            .split(',')[0]
+            .trim();
         const currentUA = req.headers['user-agent'];
 
         const storedIp = req.session.ip;
@@ -151,16 +134,16 @@ app.use('/api/', checkWork);
 app.use('/api/yandex/', yandexRoutes);
 app.use('/api/check-session/', authCheck);
 
-app.use((err, req, res, next) => {
-    console.error(err.stack);
-    res.status(500).json({ error: 'Internal Server Error' });
-});
-
 app.use(checkSession()); // вы в безопасности:
 app.use('/api/users/', usersRoutes);
 app.use('/api/gallery', galleryRoutes);
 app.use('/api/gallery', galleryEditRoutes);
 
-httpsServer.listen(3000, () => {
-    console.log('HTTPS сервер запущен на https://localhost:3000');
+app.use((err, req, res, next) => {
+    console.error(err.stack);
+    res.status(500).json({ error: 'Internal Server Error' });
+});
+
+app.listen(3000, () => {
+  console.log('HTTP сервер запущен на http://localhost:3000');
 });

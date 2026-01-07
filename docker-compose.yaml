@@ -3,13 +3,19 @@ services:
   postgres:
     image: postgres:18.1
     restart: unless-stopped
+    env_file:
+      - .env
     environment:
       POSTGRES_DB: ${PG_DATABASE}
       POSTGRES_USER: ${PG_USER}
       POSTGRES_PASSWORD: ${PG_PASSWORD}
+      APP_INIT_USERNAME: ${APP_INIT_USERNAME}
+      APP_INIT_EMAIL: ${APP_INIT_EMAIL}
+      APP_INIT_ROLE: ${APP_INIT_ROLE}
+      APP_INIT_PHONE: ${APP_INIT_PHONE}
     volumes:
-      - pgdata:/var/lib/postgresql/data
-      - ./db/init:/docker-entrypoint-initdb.d:ro  # опционально init sql
+      - pgdata:/var/lib/postgresql
+      - ./db/init:/docker-entrypoint-initdb.d:ro
     networks:
       - gallery-net
 
