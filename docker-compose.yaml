@@ -1,4 +1,39 @@
+version: "3.8"
+
+networks:
+  gallery-net:
+    driver: bridge
+
+volumes:
+  pgdata:
+  traefik-letsencrypt:
+
 services:
+  traefik:
+    image: traefik:v2.10
+    restart: unless-stopped
+    command:
+      - --api.insecure=true                                  # dashboard
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+      - --entrypoints.web.http.redirections.entryPoint.to=websecure
+      - --entrypoints.web.http.redirections.entryPoint.scheme=https
+      - --certificatesresolvers.le.acme.httpchallenge.entrypoint=web
+      - --certificatesresolvers.le.acme.storage=/letsencrypt/acme.json
+      - --certificatesresolvers.le.acme.email=${LE_EMAIL}
+      # staging:
+      # - --certificatesresolvers.le.acme.caserver=https://acme-staging-v02.api.letsencrypt.org/directory
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8080:8080"   # dashboard Traefik (insecure)
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - traefik-letsencrypt:/letsencrypt
+    networks:
+      - gallery-net
 
   postgres:
     image: postgres:18.1
@@ -6,13 +41,13 @@ services:
     env_file:
       - .env
     environment:
-      POSTGRES_DB: ${PG_DATABASE}
-      POSTGRES_USER: ${PG_USER}
-      POSTGRES_PASSWORD: ${PG_PASSWORD}
-      APP_INIT_USERNAME: ${APP_INIT_USERNAME}
-      APP_INIT_EMAIL: ${APP_INIT_EMAIL}
-      APP_INIT_ROLE: ${APP_INIT_ROLE}
-      APP_INIT_PHONE: ${APP_INIT_PHONE}
+      - POSTGRES_DB=${PG_DATABASE}
+      - POSTGRES_USER=${PG_USER}
+      - POSTGRES_PASSWORD=${PG_PASSWORD}
+      - APP_INIT_USERNAME=${APP_INIT_USERNAME}
+      - APP_INIT_EMAIL=${APP_INIT_EMAIL}
+      - APP_INIT_ROLE=${APP_INIT_ROLE}
+      - APP_INIT_PHONE=${APP_INIT_PHONE}
     volumes:
       - pgdata:/var/lib/postgresql
       - ./db/init:/docker-entrypoint-initdb.d:ro
@@ -25,12 +60,18 @@ services:
       dockerfile: Dockerfile
       args:
         NODE_ENV: production
-    env_file: 
+    env_file:
       - .env
-    ports:
-      - "3000:3000"
     depends_on:
       - postgres
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.backend.rule=Host(`${SERVER_NAME}`) && PathPrefix(`/api`)"
+      - "traefik.http.routers.backend.entrypoints=websecure"
+      - "traefik.http.routers.backend.tls.certresolver=le"
+      - "traefik.http.middlewares.strip-api.stripprefix.prefixes=/api"
+      - "traefik.http.routers.backend.middlewares=strip-api"
+      - "traefik.http.services.backend.loadbalancer.server.port=3000"
     networks:
       - gallery-net
 
@@ -42,19 +83,15 @@ services:
         SERVER_NAME: ${SERVER_NAME:-localhost}
     env_file:
       - .env
-    ports:
-      - "80:80"
-      - "443:443"
     volumes:
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
     depends_on:
       - backend
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.front.rule=Host(`${SERVER_NAME}`)"
+      - "traefik.http.routers.front.entrypoints=websecure"
+      - "traefik.http.routers.front.tls.certresolver=le"
+      - "traefik.http.services.front.loadbalancer.server.port=80"
     networks:
       - gallery-net
-
-volumes:
-  pgdata:
-
-networks:
-  gallery-net:
-    driver: bridge
