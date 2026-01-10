@@ -16,7 +16,6 @@ RUN cd frontend && npm run build
 FROM nginx:stable-alpine
 
 COPY nginx/nginx.conf /etc/nginx/nginx.conf
-COPY nginx/conf.d/ /etc/nginx/conf.d/
 
 COPY --from=builder /app/frontend/dist /usr/share/nginx/html
 
