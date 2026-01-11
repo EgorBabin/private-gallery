@@ -132,7 +132,7 @@ app.use(async (req, res, next) => {
 // Подключаем роуты
 app.use('/api/', checkWork);
 app.use('/api/yandex/', yandexRoutes);
-app.use('/api/check-session/', authCheck);
+app.use('/api/check-session', authCheck);
 
 app.use(checkSession()); // вы в безопасности:
 app.use('/api/users/', usersRoutes);
@@ -145,5 +145,5 @@ app.use((err, req, res, next) => {
 });
 
 app.listen(3000, () => {
-  console.log('HTTP сервер запущен на http://localhost:3000');
+    console.log('HTTP сервер запущен на http://localhost:3000');
 });

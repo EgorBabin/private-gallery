@@ -15,7 +15,7 @@ import { logAction } from '../utils/logger.js';
 const DEFAULTS = {
     requiredFields: ['id', 'username', 'email', 'authType'],
     sessionCookieName: process.env.SESSION || 'session',
-    frontendLoginPath: 'login',
+    frontendLoginPath: '/login',
     treatEmpty: (v) =>
         v === null ||
         v === undefined ||

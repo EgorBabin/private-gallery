@@ -12,31 +12,42 @@ export default function GalleryList() {
   useTitle(Title);
 
   const { authenticated, loading: sessionLoading } = useCheckSession();
-  const navigate = useNavigate();
-
-  useEffect(() => {
-    if (!sessionLoading && !authenticated) {
-      navigate('login');
-    }
-  }, [sessionLoading, authenticated, navigate]);
-
-  const [cards, setCards] = useState(null);
   const nav = useNavigate();
 
   useEffect(() => {
+    if (!sessionLoading && !authenticated) {
+      nav('/login');
+    }
+  }, [sessionLoading, authenticated, nav]);
+
+  const [cards, setCards] = useState(null);
+
+  useEffect(() => {
+    let mounted = true;
+
     const cached = localStorage.getItem(LS_KEY);
     if (cached) {
       try {
         const parsed = JSON.parse(cached);
-        if (Array.isArray(parsed.cards)) setCards(parsed.cards);
+        if (Array.isArray(parsed.cards) && mounted) setCards(parsed.cards);
       } catch (_) {}
     }
 
-    fetch(`${API}/cards`, { credentials: 'include' })
-      .then((r) => r.json())
+    fetch(`${API}/cards`, {
+      credentials: 'include',
+      headers: { Accept: 'application/json' },
+    })
+      .then((res) => {
+        if (res.status === 401) {
+          nav('/login');
+          return null;
+        }
+        if (!res.ok) throw new Error('Network');
+        return res.json();
+      })
       .then((d) => {
+        if (!d || !mounted) return;
         const fresh = d.cards || [];
-
         setCards(fresh);
         localStorage.setItem(
           LS_KEY,
@@ -44,7 +55,11 @@ export default function GalleryList() {
         );
       })
       .catch(() => {});
-  }, []);
+
+    return () => {
+      mounted = false;
+    };
+  }, [nav]);
 
   function stripUrls(card) {
     const { thumbnailUrl, ...rest } = card;

@@ -1,5 +1,3 @@
-import { useState, useEffect } from 'react';
-
 export function useCheckSession() {
   const [loading, setLoading] = useState(true);
   const [authenticated, setAuthenticated] = useState(false);
@@ -9,11 +7,18 @@ export function useCheckSession() {
 
     fetch('/api/check-session', {
       credentials: 'include',
+      headers: { Accept: 'application/json' },
     })
-      .then((res) => res.json())
+      .then((res) => {
+        if (!mounted) return;
+        if (res.status === 401) return { authenticated: false };
+        if (!res.ok) throw new Error('Network error');
+        return res.json();
+      })
       .then((data) => {
         if (!mounted) return;
-        setAuthenticated(!!data.authenticated);
+        if (data) setAuthenticated(!!data.authenticated);
+        else setAuthenticated(false);
       })
       .catch(() => {
         if (!mounted) return;
