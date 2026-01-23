@@ -95,7 +95,7 @@ app.get('/api/csrf-token', (req, res) => {
 
 app.use(useragent.express());
 // 🔒 Middleware проверки IP/UA
-app.use(async (req, res, next) => {
+app.use((req, res, next) => {
     console.log('Сессия:', req.session);
     if (req.session.user) {
         const currentIp = (req.headers['x-forwarded-for'] || req.ip || '')
@@ -111,7 +111,7 @@ app.use(async (req, res, next) => {
             req.session.ip = currentIp;
             req.session.ua = currentUA;
         } else if (storedIp !== currentIp || storedUA !== currentUA) {
-            await logAction(
+            logAction(
                 req,
                 '⚠️ Подозрительная активность: IP или UA изменены',
                 'server.js',

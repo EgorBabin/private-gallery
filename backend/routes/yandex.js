@@ -4,12 +4,12 @@ import { logAction } from '../utils/logger.js';
 
 const router = express.Router();
 
-router.get('/', async (req, res) => {
+router.get('/', (req, res) => {
     if (req.session.user) {
         return res.redirect(process.env.FRONTEND_URL);
     }
 
-    await logAction(req, '👁️‍🗨️ Yandex');
+    logAction(req, '👁️‍🗨️ Yandex');
     const remember = req.query.remember === '1' ? '1' : '0';
     const redirectUri =
         'https://oauth.yandex.ru/authorize' +
@@ -28,11 +28,11 @@ router.get('/callback', async (req, res) => {
 
     const { code, remember } = req.query;
     if (!code) {
-        await logAction(req, '⚠️ Нет кода авторизации в callback', 'Yandex');
+        logAction(req, '⚠️ Нет кода авторизации в callback', 'Yandex');
         return res.redirect(process.env.FRONTEND_URL);
     }
 
-    await logAction(req, '📥 Получение данных', 'Yandex');
+    logAction(req, '📥 Получение данных', 'Yandex');
 
     try {
         const tokenRes = await fetch('https://oauth.yandex.ru/token', {
@@ -69,7 +69,7 @@ router.get('/callback', async (req, res) => {
         const { rows } = await pool.query(userQuery, [email]);
 
         if (rows.length === 0) {
-            await logAction(req, '❌ Пользователь не найден', email);
+            logAction(req, '❌ Пользователь не найден', email);
             return res
                 .status(401)
                 .json({ error: 'Пользователь не найден ', email });
@@ -104,7 +104,7 @@ router.get('/callback', async (req, res) => {
         });
     } catch (err) {
         console.error(err);
-        await logAction(req, '❌ Ошибка авторизации через Яндекс');
+        logAction(req, '❌ Ошибка авторизации через Яндекс');
         res.status(500).json({ error: 'Ошибка авторизации через Яндекс' });
     }
 });

@@ -44,7 +44,7 @@ export default function checkSession(opts = {}) {
         try {
             if (!req.session) {
                 try {
-                    await logAction(req, 'Нет server-side сессии');
+                    logAction(req, 'Нет server-side сессии');
                 } catch (err) {
                     console.debug('logAction failed (no session):', err);
                 }
@@ -69,7 +69,7 @@ export default function checkSession(opts = {}) {
             const user = req.session.user;
             if (!user) {
                 try {
-                    await logAction(req, 'req.session.user отсутствует');
+                    logAction(req, 'req.session.user отсутствует');
                 } catch (err) {
                     console.debug('logAction failed (no user):', err);
                 }
@@ -139,7 +139,7 @@ export default function checkSession(opts = {}) {
 
             if (missing.length > 0) {
                 try {
-                    await logAction(
+                    logAction(
                         req,
                         `Сессия некорректна, удаляем. missing: ${missing.join(',')}`,
                     );
@@ -184,7 +184,7 @@ export default function checkSession(opts = {}) {
         } catch (err) {
             console.error('checkSession error:', err);
             try {
-                await logAction(req, `Ошибка проверки сессии: ${err.message}`);
+                logAction(req, `Ошибка проверки сессии: ${err.message}`);
             } catch (logErr) {
                 console.debug('logAction failed (exception):', logErr);
             }
