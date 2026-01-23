@@ -134,10 +134,9 @@ app.use('/api/', checkWork);
 app.use('/api/yandex/', yandexRoutes);
 app.use('/api/check-session', authCheck);
 
-app.use(checkSession()); // вы в безопасности:
-app.use('/api/users/', usersRoutes);
-app.use('/api/gallery', galleryRoutes);
-app.use('/api/gallery', galleryEditRoutes);
+app.use('/api/users/', checkSession(), usersRoutes);
+app.use('/api/gallery', checkSession(), galleryRoutes);
+app.use('/api/gallery', checkSession(), galleryEditRoutes);
 
 app.use((err, req, res, next) => {
     console.error(err.stack);

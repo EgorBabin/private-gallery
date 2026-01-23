@@ -101,8 +101,6 @@ services:
       - "traefik.http.routers.backend.rule=Host(`${SERVER_NAME}`) && PathPrefix(`/api`)"
       - "traefik.http.routers.backend.entrypoints=websecure"
       - "traefik.http.routers.backend.tls.certresolver=le"
-      - "traefik.http.middlewares.strip-api.stripprefix.prefixes=/api"
-      - "traefik.http.routers.backend.middlewares=strip-api"
       - "traefik.http.services.backend.loadbalancer.server.port=3000"
     networks:
       - gallery-net
