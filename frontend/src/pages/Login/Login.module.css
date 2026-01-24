@@ -2,8 +2,8 @@ a {
   color: var(--color-text-primary);
 }
 
-a.google {
-  background-color: var(--color-login-btn-google);
+a.telegram {
+  background-color: var(--color-login-btn-telegram);
 }
 
 a.yandex {

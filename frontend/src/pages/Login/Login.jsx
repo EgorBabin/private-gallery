@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import { useCheckSession } from '@/hooks/useCheckSession';
@@ -9,19 +9,42 @@ export default function Login() {
   useTitle('Авторизация');
 
   const { authenticated, loading } = useCheckSession();
-
   const [remember, setRemember] = useState(false);
-  const yandexHref = `/api/yandex${remember ? '?remember=1' : ''}`;
-  const googleHref = `/api/google${remember ? '?remember=1' : ''}`;
-
   const navigate = useNavigate();
+  const telegramRootRef = useRef(null);
 
   useEffect(() => {
     if (!loading && authenticated) {
       navigate(-1);
     }
-    console.log('session loading:', loading, 'authenticated:', authenticated);
   }, [loading, authenticated, navigate]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !telegramRootRef.current) return;
+
+    const container = telegramRootRef.current;
+    container.innerHTML = '';
+
+    const authUrl = `${window.location.origin}/api/telegram${remember ? '?remember=1' : ''}`;
+
+    const script = document.createElement('script');
+    script.src = 'https://telegram.org/js/telegram-widget.js?22';
+    script.async = true;
+    script.setAttribute(
+      'data-telegram-login',
+      import.meta.env.VITE_TG_BOT_USERNAME,
+    );
+    script.setAttribute('data-size', 'large');
+    script.setAttribute('data-auth-url', authUrl);
+
+    container.appendChild(script);
+
+    return () => {
+      container.innerHTML = '';
+    };
+  }, [remember, navigate]);
+
+  const yandexHref = `/api/yandex${remember ? '?remember=1' : ''}`;
 
   return (
     <div className={styles.div}>
@@ -34,9 +57,11 @@ export default function Login() {
         Запомнить меня
       </label>
 
-      <a className={styles.google} href={googleHref}>
-        Google
-      </a>
+      <div ref={telegramRootRef} className={styles.telegram}>
+        {/* Фоллбек ссылка для случаев, когда скрипт заблокирован */}
+        <a href={`/api/telegram${remember ? '?remember=1' : ''}`}>Telegram</a>
+      </div>
+
       <a className={styles.yandex} href={yandexHref}>
         Yandex
       </a>

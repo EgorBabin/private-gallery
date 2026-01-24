@@ -14,6 +14,7 @@ import useragent from 'express-useragent';
 
 import checkWork from './routes/hello.js';
 import usersRoutes from './routes/users.js';
+import telegramRoutes from './routes/telegram.js';
 import yandexRoutes from './routes/yandex.js';
 import authCheck from './utils/authCheck.js';
 import { logAction } from './utils/logger.js';
@@ -131,6 +132,7 @@ app.use((req, res, next) => {
 
 // Подключаем роуты
 app.use('/api/', checkWork);
+app.use('/api/telegram/', telegramRoutes);
 app.use('/api/yandex/', yandexRoutes);
 app.use('/api/check-session', authCheck);
 

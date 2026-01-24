@@ -10,7 +10,7 @@
   --color-border: ; /* Граница / разделитель */
 
   /* Страница */
-  --color-login-btn-google: rgb(95, 158, 160); /* Кнопка входа - google */
+  --color-login-btn-telegram: rgb(95, 158, 160); /* Кнопка входа - telegram */
   --color-login-btn-yandex: rgb(165, 54, 42); /* Кнопка входа - yandex */
   --color-users-border: rgb(150, 150, 150); /* Граница форм users*/
   --color-users-bg-field: rgb(17, 17, 17); /*  */
