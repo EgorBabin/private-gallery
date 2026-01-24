@@ -14,7 +14,7 @@ export default function UsersPage() {
   const [form, setForm] = useState({
     username: '',
     email: '',
-    phone: '',
+    telegramID: '',
     role: 'user',
   });
   const [loading, setLoading] = useState(false);
@@ -71,7 +71,7 @@ export default function UsersPage() {
       }
 
       setUsers((prev) => [...prev, data]);
-      setForm({ username: '', email: '', phone: '', role: 'user' });
+      setForm({ username: '', email: '', telegramID: '', role: 'user' });
 
       setIsDirty(false); // сбрасываем грязь, после сохранения
     } catch (e) {
@@ -130,13 +130,13 @@ export default function UsersPage() {
                 <th>ID</th>
                 <th>Имя</th>
                 <th>Email</th>
-                <th>Телефон</th>
+                <th>ID</th>
                 <th>Роль</th>
                 <th>Действия</th>
               </tr>
             </thead>
             <tbody>
-              {users.map(({ id, username, email, phone, role }) => (
+              {users.map(({ id, username, email, telegramID, role }) => (
                 <tr key={id}>
                   <td>{id}</td>
                   <td>
@@ -160,19 +160,21 @@ export default function UsersPage() {
                           email: e.target.value.split(',').map((s) => s.trim()),
                         })
                       }
-                      placeholder="Email1, Email2"
+                      placeholder="Email"
                     />
                   </td>
                   <td>
                     <input
-                      type="text"
-                      value={phone || ''}
+                      type="tel"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      value={telegramID || ''}
                       onChange={(e) =>
                         handleUpdate(id, {
-                          phone: e.target.value,
+                          telegramID: e.target.value,
                         })
                       }
-                      placeholder="Телефон"
+                      placeholder="Телеграм ID"
                     />
                   </td>
                   <td>
@@ -225,10 +227,12 @@ export default function UsersPage() {
             // required
           />
           <input
-            inputMode="tel"
-            name="phone"
-            placeholder="Телефон"
-            value={form.phone}
+            type="tel"
+            inputMode="numeric"
+            pattern="[0-9]*"
+            name="telegramID"
+            placeholder="Телеграм ID"
+            value={form.telegramID}
             onChange={handleChange}
             // required
           />

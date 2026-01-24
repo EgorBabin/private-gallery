@@ -61,11 +61,11 @@ router.get('/callback', async (req, res) => {
 
         const email = userInfo.default_email;
 
-        // Найти пользователя по email и телефону
         const userQuery = `
-        SELECT * FROM users
-        WHERE $1 = ANY(email)
-    `;
+            SELECT * FROM users
+            WHERE email = $1
+            LIMIT 1
+        `;
         const { rows } = await pool.query(userQuery, [email]);
 
         if (rows.length === 0) {
