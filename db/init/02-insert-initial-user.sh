@@ -28,25 +28,25 @@ else
 fi
 
 role="${APP_INIT_ROLE:-user}"
-phone="${APP_INIT_PHONE:-}"
+telegramID="${APP_INIT_TG_ID:-}"
 
 role_esc=$(printf "%s" "$role" | sed "s/'/''/g")
-phone_esc=$(printf "%s" "$phone" | sed "s/'/''/g")
+telegramID_esc=$(printf "%s" "$telegramID" | sed "s/'/''/g")
 username_esc=$(printf "%s" "$APP_INIT_USERNAME" | sed "s/'/''/g")
 
 psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" <<-SQL
-INSERT INTO public.users (username, email, created_at, is_active, role, phone)
+INSERT INTO public.users (username, email, created_at, is_active, role, telegramID)
 VALUES (
   '${username_esc}',
   ${emails_sql},
   now(),
   ${is_active_sql},
   '${role_esc}',
-  '${phone_esc}'
+  '${telegramID_esc}'
 )
 ON CONFLICT (username) DO UPDATE
   SET email = EXCLUDED.email,
       is_active = COALESCE(EXCLUDED.is_active, public.users.is_active),
       role = EXCLUDED.role,
-      phone = EXCLUDED.phone;
+      telegramID = EXCLUDED.telegramID;
 SQL

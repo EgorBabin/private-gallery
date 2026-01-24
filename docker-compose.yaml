@@ -78,7 +78,7 @@ services:
       - APP_INIT_USERNAME=${APP_INIT_USERNAME}
       - APP_INIT_EMAIL=${APP_INIT_EMAIL}
       - APP_INIT_ROLE=${APP_INIT_ROLE}
-      - APP_INIT_PHONE=${APP_INIT_PHONE}
+      - APP_INIT_TG_ID=${APP_INIT_TG_ID}
     volumes:
       - pgdata:/var/lib/postgresql
       - ./db/init:/docker-entrypoint-initdb.d:ro

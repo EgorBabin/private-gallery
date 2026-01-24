@@ -63,7 +63,7 @@ router.get('/callback', async (req, res) => {
 
         const userQuery = `
             SELECT * FROM users
-            WHERE email = $1
+            WHERE $1 = ANY(email)
             LIMIT 1
         `;
         const { rows } = await pool.query(userQuery, [email]);
