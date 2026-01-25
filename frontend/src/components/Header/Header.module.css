@@ -19,15 +19,8 @@
   border: 2px solid transparent;
   box-shadow: 0 10px 32px var(--color-header-bg);
 
-  @supports (backdrop-filter: url(#frosted)) {
-    backdrop-filter: url(#frosted);
-    -webkit-backdrop-filter: url(#frosted);
-  }
-
-  @supports not (backdrop-filter: url(#frosted)) {
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
-  }
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
 }
 
 header svg {

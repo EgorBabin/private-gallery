@@ -4,9 +4,11 @@ import pool from '../db.js';
 const router = express.Router();
 
 function normalizeUser(row) {
-  if (!row) return row;
-  const { telegramid, ...rest } = row;
-  return { ...rest, telegramID: telegramid ?? null };
+    if (!row) {
+        return row;
+    }
+    const { telegramid, ...rest } = row;
+    return { ...rest, telegramID: telegramid ?? null };
 }
 
 router.get('/', async (req, res) => {
@@ -60,7 +62,9 @@ router.post('/', async (req, res) => {
 
     const telegramIDRegex = /^\d+$/;
     if (!telegramIDRegex.test(telegramID)) {
-        return res.status(400).json({ error: 'Некорректный формат ID telegram' });
+        return res
+            .status(400)
+            .json({ error: 'Некорректный формат ID telegram' });
     }
 
     try {

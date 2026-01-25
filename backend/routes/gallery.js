@@ -34,7 +34,21 @@ router.get('/cards', async (req, res) => {
                     thumbnailUrl = await getSignedUrlForKey(firstKey, 60 * 5);
                 }
 
-                cards.push({ year, category, prefix, thumbnailUrl });
+                const listResult = await listObjects(
+                    `${PREVIEW_ROOT}${prefix}`,
+                );
+                const files = listResult.Contents || [];
+                const imageCount = files.filter(
+                    (f) => f.Key && f.Key.endsWith('.jpg'),
+                ).length;
+
+                cards.push({
+                    year,
+                    category,
+                    prefix,
+                    thumbnailUrl,
+                    imageCount,
+                });
             }
         }
 

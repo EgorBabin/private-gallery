@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useCheckSession } from '@/hooks/useCheckSession';
 import { useTitle } from '@/hooks/useTitle';
 import styles from './GalleryList.module.css';
+import { Images } from 'lucide-react';
 
 const API = '/api/gallery';
 const LS_KEY = 'gallery_cards_cache';
@@ -21,6 +22,7 @@ export default function GalleryList() {
   }, [sessionLoading, authenticated, nav]);
 
   const [cards, setCards] = useState(null);
+  const [imageAllCount, setImageAllCount] = useState(0);
 
   useEffect(() => {
     let mounted = true;
@@ -29,7 +31,12 @@ export default function GalleryList() {
     if (cached) {
       try {
         const parsed = JSON.parse(cached);
-        if (Array.isArray(parsed.cards) && mounted) setCards(parsed.cards);
+        if (Array.isArray(parsed.cards) && mounted) {
+          setCards(parsed.cards);
+          setImageAllCount(
+            parsed.cards.reduce((sum, c) => sum + (c.imageCount || 0), 0),
+          );
+        }
       } catch (_) {}
     }
 
@@ -49,6 +56,9 @@ export default function GalleryList() {
         if (!d || !mounted) return;
         const fresh = d.cards || [];
         setCards(fresh);
+        setImageAllCount(
+          fresh.reduce((sum, c) => sum + (c.imageCount || 0), 0),
+        );
         localStorage.setItem(
           LS_KEY,
           JSON.stringify({ cards: fresh.map(stripUrls) }),
@@ -81,6 +91,13 @@ export default function GalleryList() {
 
   return (
     <div className={styles.Galleries}>
+      <p>
+        {cards && (
+          <div>
+            <Images /> {imageAllCount}
+          </div>
+        )}
+      </p>
       {cards === null
         ? skeletonCards
         : cards.map((c) => (
@@ -95,7 +112,10 @@ export default function GalleryList() {
                   <img src={c.thumbnailUrl} alt="" className={styles.photo} />
                 )}
               </div>
-              <h2>{c.year}</h2>
+              <h2>
+                {c.year}{' '}
+                <span className={styles.imageCount}>— {c.imageCount}</span>
+              </h2>
             </div>
           ))}
     </div>

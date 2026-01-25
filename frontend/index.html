@@ -26,25 +26,5 @@
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
-
-    <svg style="position: absolute; width: 0; height: 0">
-      <filter id="frosted">
-        <feTurbulence
-          type="turbulence"
-          baseFrequency="0.001"
-          numOctaves="1"
-          seed="1"
-          result="warp"
-        />
-        <feDisplacementMap
-          in="SourceGraphic"
-          in2="warp"
-          scale="50"
-          xChannelSelector="R"
-          yChannelSelector="G"
-        />
-        <feGaussianBlur stdDeviation="5" />
-      </filter>
-    </svg>
   </body>
 </html>

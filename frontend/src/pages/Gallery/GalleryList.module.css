@@ -64,6 +64,21 @@
   font-weight: normal;
 }
 
+.imageCount {
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.3s;
+}
+
+.card:hover .imageCount {
+  opacity: 1;
+  visibility: visible;
+}
+
+.card:not(:hover) .imageCount {
+  transition-delay: 0.3s;
+}
+
 .skeleton {
   background: #343434;
   color: transrgb(32, 32, 32);
