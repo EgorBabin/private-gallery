@@ -3,10 +3,16 @@ import pool from '../db.js';
 
 const router = express.Router();
 
+function normalizeUser(row) {
+  if (!row) return row;
+  const { telegramid, ...rest } = row;
+  return { ...rest, telegramID: telegramid ?? null };
+}
+
 router.get('/', async (req, res) => {
     try {
         const { rows } = await pool.query('SELECT * FROM users');
-        res.json(rows);
+        res.json(rows.map(normalizeUser));
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'Failed to fetch users' });
@@ -62,7 +68,7 @@ router.post('/', async (req, res) => {
             'INSERT INTO users (username, email, telegramID, role) VALUES ($1, $2, $3, $4) RETURNING *',
             [username, email, telegramID, role || 'user'],
         );
-        res.json(rows[0]);
+        res.json(normalizeUser(rows[0]));
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'Failed to create user' });
@@ -93,7 +99,7 @@ router.put('/:id', async (req, res) => {
         if (rows.length === 0) {
             return res.status(404).json({ error: 'User not found' });
         }
-        res.json(rows[0]);
+        res.json(normalizeUser(rows[0]));
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'Failed to update user' });

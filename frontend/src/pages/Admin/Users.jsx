@@ -130,7 +130,7 @@ export default function UsersPage() {
                 <th>ID</th>
                 <th>Имя</th>
                 <th>Email</th>
-                <th>ID</th>
+                <th>tgID</th>
                 <th>Роль</th>
                 <th>Действия</th>
               </tr>
