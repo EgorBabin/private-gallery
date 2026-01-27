@@ -1,8 +1,9 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { Swiper, SwiperSlide } from 'swiper/react';
-import { Navigation, Keyboard } from 'swiper/modules';
+import { Navigation, Keyboard, Scrollbar } from 'swiper/modules';
 import 'swiper/css';
 import 'swiper/css/navigation';
+import 'swiper/css/scrollbar';
 
 import styles from './Lightbox.module.css';
 
@@ -240,12 +241,15 @@ export default function Lightbox({
           ref={swiperRef}
           initialSlide={startIndex}
           onSlideChange={(s) => setCurrent(s.activeIndex)}
-          modules={[Navigation, Keyboard]}
+          modules={[Navigation, Keyboard, Scrollbar]}
           navigation={{
             nextEl: '.swiper-button-next',
             prevEl: '.swiper-button-prev',
           }}
           keyboard={{ enabled: true }}
+          scrollbar={{
+            hide: true,
+          }}
           centeredSlides
           slidesPerView="auto"
           spaceBetween={20}

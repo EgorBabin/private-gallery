@@ -71,6 +71,14 @@
   z-index: 10002;
 }
 
+:global(.swiper-scrollbar) {
+  background: var(--color-swiper-scrollbar);
+}
+
+:global(.swiper-scrollbar-drag) {
+  background: var(--color-swiper-scrollbar-drag);
+}
+
 :global(.swiper-button-prev),
 :global(.swiper-button-next) {
   position: fixed;
