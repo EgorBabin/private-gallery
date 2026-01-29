@@ -37,8 +37,9 @@
   --color-header-bg-stick: rgb(139, 139, 139); /* Разделитель - header */
   --color-swiper-scrollbar: rgba(139, 139, 139, 0.25);
   --color-swiper-scrollbar-drag: rgba(255, 255, 255, 0.7);
-  --color-: ;
-  --color-: ;
+  --color-scroll-progress-bar-bg1: rgba(255, 107, 107, 0.5);
+  --color-scroll-progress-bar-bg2: rgba(254, 180, 123, 0.5);
+  --color-scroll-progress-bar-box-shadow: rgba(255, 107, 107, 0.2);
   --color-: ;
   --color-: ;
 }

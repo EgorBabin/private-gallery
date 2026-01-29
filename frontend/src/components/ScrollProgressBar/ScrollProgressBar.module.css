@@ -1,0 +1,17 @@
+.progressBar {
+  height: 0.35rem;
+  width: 0%;
+  position: fixed;
+  border-radius: 0 0 0.35rem 0;
+  top: 0;
+  z-index: 200;
+
+  background: linear-gradient(
+    90deg,
+    var(--color-scroll-progress-bar-bg1) 0%,
+    var(--color-scroll-progress-bar-bg2) 50%
+  );
+  box-shadow: 0 8px 32px 0 var(--color-scroll-progress-bar-box-shadow);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}

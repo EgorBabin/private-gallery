@@ -18,6 +18,7 @@ import Login from '@/pages/Login/Login';
 
 import NotFound from '@/pages/404/404';
 // components
+import ScrollProgressBar from '@/components/ScrollProgressBar/ScrollProgressBar';
 import Header from '@/components/Header/Header';
 
 function AppInner() {
@@ -34,6 +35,7 @@ function AppInner() {
         </div>
       )}
 
+      <ScrollProgressBar />
       <Header />
 
       <Routes>
