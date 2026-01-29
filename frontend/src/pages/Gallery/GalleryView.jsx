@@ -191,9 +191,7 @@ export default function GalleryView() {
                   <img
                     data-src={it.url}
                     id={idx}
-                    alt={it.key || `img-${idx}`}
                     className={styles.img}
-                    loading="lazy"
                     onError={(e) => {
                       e.currentTarget.style.opacity = '0.6';
                       e.currentTarget.style.filter = 'grayscale(1)';

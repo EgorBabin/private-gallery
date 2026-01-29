@@ -13,7 +13,7 @@
   border-radius: 6px;
   overflow: hidden;
   background: #555555;
-  color: #777777;
+  color: #000000;
   display: block;
   cursor: pointer;
 }
@@ -23,6 +23,7 @@
   height: 100%;
   object-fit: cover;
   display: block;
+  background: #555555;
 }
 
 h1 {
