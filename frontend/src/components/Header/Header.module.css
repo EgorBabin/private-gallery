@@ -34,6 +34,7 @@ header svg {
   padding: 0 0.5rem;
   text-decoration: none;
   color: inherit;
+  cursor: pointer;
 }
 
 .nav svg:active {
