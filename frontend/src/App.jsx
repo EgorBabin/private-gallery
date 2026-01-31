@@ -5,9 +5,7 @@ import {
   useLocation,
   matchPath,
 } from 'react-router-dom';
-import useHttpInterceptor from './hooks/useHttpInterceptor';
 
-import ColorBends from '@/components/ColorBends/ColorBends';
 // pages
 import GalleryList from '@/pages/Gallery/GalleryList';
 import GalleryView from '@/pages/Gallery/GalleryView';
@@ -20,9 +18,15 @@ import NotFound from '@/pages/404/404';
 // components
 import ScrollProgressBar from '@/components/ScrollProgressBar/ScrollProgressBar';
 import Header from '@/components/Header/Header';
+// hooks
+import useHttpInterceptor from './hooks/useHttpInterceptor';
+import ColorBends from '@/components/ColorBends/ColorBends';
+import { useScrollFix } from '@/hooks/useScrollFix';
 
 function AppInner() {
   useHttpInterceptor();
+
+  useScrollFix();
 
   const location = useLocation();
   const hideBackground = matchPath('/:year/:category', location.pathname);
