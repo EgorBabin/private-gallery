@@ -12,7 +12,7 @@ export default function UploadForm() {
   const handleUpload = async () => {
     if (!file) return;
 
-    const path = location.pathname.replace(/^\/edit\//, ''); // "2020/event"
+    const path = location.pathname.replace(/^\/edit\//, '');
 
     const formData = new FormData();
     formData.append('image', file);
@@ -25,12 +25,20 @@ export default function UploadForm() {
         method: 'POST',
         body: formData,
       });
-      const data = await res.json();
 
-      if (res.ok) setStatus(`✅ Загружено: ${data.newFile}`);
-      else setStatus(`❌ Ошибка: ${data.error}`);
-    } catch (err) {
-      console.error(err);
+      const contentType = res.headers.get('content-type') || '';
+      const data = contentType.includes('application/json')
+        ? await res.json()
+        : null;
+
+      if (!res.ok) {
+        setStatus(data?.error || `Ошибка ${res.status}`);
+        return;
+      }
+
+      setStatus('✅ Файл принят и обрабатывается');
+    } catch (e) {
+      console.error(e);
       setStatus('Ошибка соединения');
     }
   };

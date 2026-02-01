@@ -6,6 +6,7 @@ import {
     HeadObjectCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl as awsGetSignedUrl } from '@aws-sdk/s3-request-presigner';
+import path from 'path';
 
 const BUCKET = process.env.S3_BUCKET;
 const forcePath = process.env.S3_FORCE_PATH_STYLE === 'true';
@@ -97,34 +98,30 @@ export async function getSignedUrlForKey(key, expiresInSec = 300) {
     return awsGetSignedUrl(s3, cmd, { expiresIn: expiresInSec });
 }
 
-export async function uploadToS3(buffer, key, contentType = 'image/jpeg') {
+const CONTENT_TYPES = {
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.png': 'image/png',
+    '.webp': 'image/webp',
+    '.avif': 'image/avif',
+    '.json': 'application/json',
+};
+
+export async function uploadToS3(buffer, key, contentType) {
+    let ct = contentType;
+    if (!ct) {
+        const ext = path.extname(key).toLowerCase();
+        ct = CONTENT_TYPES[ext] || 'application/octet-stream';
+    }
+
     const cmd = new PutObjectCommand({
         Bucket: BUCKET,
         Key: key,
         Body: buffer,
-        ContentType: contentType,
+        ContentType: ct,
     });
+
     await s3.send(cmd);
-}
-
-export async function getLastImageNumber(prefix) {
-    const cmd = new ListObjectsV2Command({
-        Bucket: BUCKET,
-        Prefix: prefix,
-    });
-
-    const data = await s3.send(cmd);
-
-    if (!data.Contents?.length) {
-        return 0;
-    }
-
-    const numbers = data.Contents.map((obj) => {
-        const match = obj.Key.match(/(\d+)\.jpg$/);
-        return match ? parseInt(match[1], 10) : 0;
-    }).filter(Boolean);
-
-    return numbers.length ? Math.max(...numbers) : 0;
 }
 
 export default s3;

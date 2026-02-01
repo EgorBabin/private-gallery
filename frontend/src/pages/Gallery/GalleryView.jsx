@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import Lightbox from '@/components/Lightbox/Lightbox';
 import { useTitle } from '@/hooks/useTitle';
 import styles from './GalleryView.module.css';
@@ -11,12 +11,79 @@ export default function GalleryView() {
   const prefix = `${year}/${category}/`;
   const [items, setItems] = useState([]);
   const [openIndex, setOpenIndex] = useState(-1);
-  const [originalUrls, setOriginalUrls] = useState([]);
-  const scrollRef = useRef(null);
 
+  const [originalUrls, setOriginalUrls] = useState([]);
+  const [originalMetas, setOriginalMetas] = useState([]);
+
+  const scrollRef = useRef(null);
   useTitle(`${year} ${category}`);
 
-  // fetch previews
+  const pickUrlFromMeta = useCallback((meta) => {
+    if (!meta) return null;
+    if (typeof meta === 'string') return meta;
+    if (meta.url && typeof meta.url === 'string') return meta.url;
+
+    const dpr =
+      typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
+    const width =
+      typeof window !== 'undefined' ? (window.innerWidth || 1024) * dpr : 1024;
+    const effectiveType =
+      (navigator &&
+        navigator.connection &&
+        navigator.connection.effectiveType) ||
+      '';
+    const slow = ['slow-2g', '2g', '3g'].includes(effectiveType);
+
+    const orderIfSlow = [
+      'preview',
+      'screen-1280',
+      'screen-1920',
+      'screen-2560',
+      'original',
+    ];
+    const orderIfFast = [
+      'screen-2560',
+      'screen-1920',
+      'screen-1280',
+      'preview',
+      'original',
+    ];
+
+    let preferred = null;
+    if (width <= 400) preferred = 'preview';
+    else if (width <= 1280) preferred = 'screen-1280';
+    else if (width <= 1920) preferred = 'screen-1920';
+    else preferred = 'screen-2560';
+
+    const getUrl = (k) => {
+      const v = meta[k] ?? meta[k.replace('-', '')];
+      if (!v) return null;
+      if (typeof v === 'string') return v;
+      if (v.url) return v.url;
+      return null;
+    };
+
+    const order = slow
+      ? orderIfSlow
+      : [preferred, ...orderIfFast.filter((o) => o !== preferred)];
+
+    for (const k of order) {
+      const u = getUrl(k);
+      if (u) return u;
+    }
+
+    const orig =
+      getUrl('original') || getUrl('original_photo') || getUrl('orig');
+    if (orig) return orig;
+
+    for (const v of Object.values(meta)) {
+      if (!v) continue;
+      if (typeof v === 'string') return v;
+      if (v && v.url) return v.url;
+    }
+    return null;
+  }, []);
+
   useEffect(() => {
     const controller = new AbortController();
     let mounted = true;
@@ -31,12 +98,20 @@ export default function GalleryView() {
         if (!res.ok) {
           setItems([]);
           setOriginalUrls([]);
+          setOriginalMetas([]);
           return;
         }
         const d = await res.json();
         const newItems = d.items || [];
         setItems(newItems);
+
         setOriginalUrls((prev) => {
+          const arr = new Array(newItems.length);
+          for (let i = 0; i < Math.min(prev.length, arr.length); i++)
+            arr[i] = prev[i];
+          return arr;
+        });
+        setOriginalMetas((prev) => {
           const arr = new Array(newItems.length);
           for (let i = 0; i < Math.min(prev.length, arr.length); i++)
             arr[i] = prev[i];
@@ -47,6 +122,7 @@ export default function GalleryView() {
         if (!mounted) return;
         setItems([]);
         setOriginalUrls([]);
+        setOriginalMetas([]);
       }
     })();
 
@@ -56,76 +132,65 @@ export default function GalleryView() {
     };
   }, [prefix]);
 
-  // lazy-load images via IntersectionObserver
-  useEffect(() => {
-    const root = scrollRef.current;
-    if (!root) return;
-    const imgs = Array.from(root.querySelectorAll('img[data-src]'));
-    if (!imgs.length) return;
-
-    const obs = new IntersectionObserver((entries) => {
-      for (const ent of entries) {
-        if (ent.isIntersecting) {
-          const img = ent.target;
-          const src = img.dataset.src;
-          if (src) {
-            img.src = src;
-            img.removeAttribute('data-src');
-          }
-          obs.unobserve(img);
-        }
-      }
-    });
-
-    imgs.forEach((i) => obs.observe(i));
-    return () => obs.disconnect();
-  }, [items]);
-
   const open = useCallback(
     async (index) => {
       if (index < 0 || index >= items.length) return;
       setOpenIndex(index);
 
-      // предзагрузить соседей
       const needed = [index];
       if (index - 1 >= 0) needed.push(index - 1);
       if (index + 1 < items.length) needed.push(index + 1);
 
-      const fetched = {};
+      const fetchedUrls = {};
+      const fetchedMetas = {};
+
       await Promise.all(
         needed.map(async (i) => {
           if (originalUrls[i]) {
-            fetched[i] = originalUrls[i];
+            fetchedUrls[i] = originalUrls[i];
             return;
           }
           try {
             const key = items[i].key.replace(/^preview\//, 'original_photo/');
             const r = await fetch(
               `/api/gallery/original?key=${encodeURIComponent(key)}`,
-              {
-                credentials: 'include',
-              },
+              { credentials: 'include' },
             );
             if (!r.ok) return;
             const jd = await r.json();
-            if (jd?.url) fetched[i] = jd.url;
-            // eslint-disable-next-line no-unused-vars
+
+            const chosen = pickUrlFromMeta(jd);
+            if (chosen) fetchedUrls[i] = chosen;
+            fetchedMetas[i] = jd;
           } catch (e) {
             // ignore
           }
         }),
       );
 
-      if (Object.keys(fetched).length === 0) return;
+      if (
+        Object.keys(fetchedUrls).length === 0 &&
+        Object.keys(fetchedMetas).length === 0
+      )
+        return;
 
       setOriginalUrls((prev) => {
         const copy = prev.slice();
         if (copy.length < items.length) copy.length = items.length;
-        for (const k of Object.keys(fetched)) copy[Number(k)] = fetched[k];
+        for (const k of Object.keys(fetchedUrls))
+          copy[Number(k)] = fetchedUrls[k];
+        return copy;
+      });
+
+      setOriginalMetas((prev) => {
+        const copy = prev.slice();
+        if (copy.length < items.length) copy.length = items.length;
+        for (const k of Object.keys(fetchedMetas))
+          copy[Number(k)] = fetchedMetas[k];
         return copy;
       });
     },
-    [items, originalUrls],
+    [items, originalUrls, pickUrlFromMeta],
   );
 
   const fetchOriginal = useCallback(
@@ -136,25 +201,29 @@ export default function GalleryView() {
         const key = items[i].key.replace(/^preview\//, 'original_photo/');
         const res = await fetch(
           `/api/gallery/original?key=${encodeURIComponent(key)}`,
-          {
-            credentials: 'include',
-          },
+          { credentials: 'include' },
         );
         if (!res.ok) return null;
         const jd = await res.json();
-        if (!jd?.url) return null;
+        const chosen = pickUrlFromMeta(jd);
         setOriginalUrls((prev) => {
           const copy = prev.slice();
           if (copy.length < items.length) copy.length = items.length;
-          copy[i] = jd.url;
+          copy[i] = chosen;
           return copy;
         });
-        return jd.url;
+        setOriginalMetas((prev) => {
+          const copy = prev.slice();
+          if (copy.length < items.length) copy.length = items.length;
+          copy[i] = jd;
+          return copy;
+        });
+        return chosen;
       } catch {
         return null;
       }
     },
-    [items, originalUrls],
+    [items, originalUrls, pickUrlFromMeta],
   );
 
   return (
@@ -189,8 +258,10 @@ export default function GalleryView() {
                   tabIndex={0}
                 >
                   <img
-                    data-src={it.url}
-                    id={idx}
+                    src={it.url}
+                    loading="lazy"
+                    decoding="async"
+                    alt={it.key ?? `${prefix}${idx}`}
                     className={styles.img}
                     onError={(e) => {
                       e.currentTarget.style.opacity = '0.6';
@@ -209,6 +280,7 @@ export default function GalleryView() {
           startIndex={openIndex}
           items={items}
           originalUrls={originalUrls}
+          originalMetas={originalMetas}
           onClose={() => setOpenIndex(-1)}
           fetchOriginal={fetchOriginal}
         />

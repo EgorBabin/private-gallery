@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import styles from './Header.module.css';
-import { Film, ArrowUpToLine, Users, GalleryVertical } from 'lucide-react';
+import { Film, ArrowUpToLine, Users, FolderCog } from 'lucide-react';
 import { useVibration } from '@/hooks/useVibration';
 
 export default function Header() {
@@ -131,7 +131,7 @@ export default function Header() {
         </Link>
 
         <Link to={editPath} onClick={() => vibrate('click')}>
-          <GalleryVertical />
+          <FolderCog />
         </Link>
 
         <Link to="/admin" onClick={() => vibrate('click')}>
