@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useCsrfFetch } from '@/hooks/useCsrfFetch';
 import styles from './GalleryEdit.module.css';
@@ -6,13 +6,66 @@ import styles from './GalleryEdit.module.css';
 export default function UploadForm() {
   const csrfFetch = useCsrfFetch();
   const [file, setFile] = useState(null);
+  const [previewUrl, setPreviewUrl] = useState('');
   const [status, setStatus] = useState('');
+
+  const [year, setYear] = useState('');
+  const [title, setTitle] = useState('');
+
   const location = useLocation();
 
-  const handleUpload = async () => {
-    if (!file) return;
+  useEffect(() => {
+    if (!file) {
+      setPreviewUrl('');
+      return;
+    }
+    const url = URL.createObjectURL(file);
+    setPreviewUrl(url);
 
-    const path = location.pathname.replace(/^\/edit\//, '');
+    return () => {
+      URL.revokeObjectURL(url);
+    };
+  }, [file]);
+
+  const isEditRoot = (pathname) => {
+    return pathname === '/edit' || pathname === '/edit/';
+  };
+
+  const slugify = (str) => {
+    return encodeURIComponent(
+      String(str)
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9а-яё\s-]/g, '')
+        .replace(/\s+/g, '-')
+        .replace(/-+/g, '-')
+        .replace(/^-|-$/g, ''),
+    );
+  };
+
+  const handleUpload = async () => {
+    if (!file) {
+      setStatus('Прикрепите файл');
+      return;
+    }
+
+    let path = '';
+
+    if (isEditRoot(location.pathname)) {
+      if (!year.trim() || !title.trim()) {
+        setStatus('Введите год и название');
+        return;
+      }
+
+      if (!/^\d{1,4}$/.test(year.trim())) {
+        setStatus('Год должен содержать только цифры (например 2026)');
+        return;
+      }
+
+      path = `${year.trim()}/${slugify(title)}`;
+    } else {
+      path = location.pathname.replace(/^\/edit\//, '').replace(/\/+$/, '');
+    }
 
     const formData = new FormData();
     formData.append('image', file);
@@ -37,6 +90,9 @@ export default function UploadForm() {
       }
 
       setStatus('✅ Файл принят и обрабатывается');
+      setFile(null);
+      setYear('');
+      setTitle('');
     } catch (e) {
       console.error(e);
       setStatus('Ошибка соединения');
@@ -45,23 +101,51 @@ export default function UploadForm() {
 
   return (
     <div className={styles.main}>
-      {file ? (
+      {previewUrl ? (
         <div className={styles.container}>
-          <img
-            src={URL.createObjectURL(file)}
-            alt="preview"
-            className={styles.img}
-          />
+          <img src={previewUrl} alt="preview" className={styles.img} />
         </div>
       ) : (
         <div className={styles.item}>Прикрепите фотографию</div>
       )}
 
+      {isEditRoot(location.pathname) && (
+        <div className={styles.metaFields}>
+          <p>Создание новой папки:</p>
+
+          <p>
+            <label>
+              Год
+              <input
+                type="text"
+                inputMode="numeric"
+                value={year}
+                onChange={(e) => setYear(e.target.value.replace(/[^0-9]/g, ''))}
+                placeholder="2026"
+              />
+            </label>
+          </p>
+
+          <p>
+            <label>
+              Название папки
+              <input
+                type="text"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="С мал. буквы, на англ."
+              />
+            </label>
+          </p>
+        </div>
+      )}
+
       <input
         type="file"
         accept="image/*"
-        onChange={(e) => setFile(e.target.files[0])}
+        onChange={(e) => setFile(e.target.files && e.target.files[0])}
       />
+
       <button onClick={handleUpload}>Загрузить</button>
       <p>{status}</p>
     </div>

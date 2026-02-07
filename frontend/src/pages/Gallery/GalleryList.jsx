@@ -59,10 +59,7 @@ export default function GalleryList() {
         setImageAllCount(
           fresh.reduce((sum, c) => sum + (c.imageCount || 0), 0),
         );
-        localStorage.setItem(
-          LS_KEY,
-          JSON.stringify({ cards: fresh.map(stripUrls) }),
-        );
+        localStorage.setItem(LS_KEY, JSON.stringify({ cards: fresh }));
       })
       .catch(() => {});
 
@@ -70,11 +67,6 @@ export default function GalleryList() {
       mounted = false;
     };
   }, [nav]);
-
-  function stripUrls(card) {
-    const { thumbnailUrl, ...rest } = card;
-    return rest;
-  }
 
   const skeletonCount = 6;
   const skeletonCards = Array.from({ length: skeletonCount }, (_, i) => (

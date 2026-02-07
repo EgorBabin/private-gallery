@@ -44,9 +44,10 @@ function AppInner() {
 
       <Routes>
         <Route path="/" element={<GalleryList />} />
-        <Route path="/edit" element={<GalleryList />} />
-        <Route path="/:year/:category" element={<GalleryView />} />
+        <Route path="/edit" element={<GalleryEdit />} />
         <Route path="/edit/:year/:category" element={<GalleryEdit />} />
+        <Route path="/edit/admin" element={<Users />} />
+        <Route path="/:year/:category" element={<GalleryView />} />
         <Route path="/admin" element={<Users />} />
         <Route path="/login" element={<Login />} />
         <Route path="/auth" element={<Login />} />
