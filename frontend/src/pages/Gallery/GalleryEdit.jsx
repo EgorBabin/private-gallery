@@ -11,6 +11,7 @@ export default function UploadForm() {
 
   const [year, setYear] = useState('');
   const [title, setTitle] = useState('');
+  const [isVideo, setIsVideo] = useState(false);
 
   const location = useLocation();
 
@@ -71,6 +72,10 @@ export default function UploadForm() {
     formData.append('image', file);
     formData.append('path', path);
 
+    if (isVideo) {
+      formData.append('video', 'true');
+    }
+
     setStatus('Загружается...');
 
     try {
@@ -93,6 +98,7 @@ export default function UploadForm() {
       setFile(null);
       setYear('');
       setTitle('');
+      setIsVideo(false);
     } catch (e) {
       console.error(e);
       setStatus('Ошибка соединения');
@@ -140,9 +146,23 @@ export default function UploadForm() {
         </div>
       )}
 
+      <p>
+        <label>
+          <input
+            type="checkbox"
+            checked={isVideo}
+            onChange={(e) => setIsVideo(e.target.checked)}
+          />{' '}
+          Это превью для видео
+        </label>
+        <p>
+          <i>забронировать место для видео</i>
+        </p>
+      </p>
+
       <input
         type="file"
-        accept="image/*"
+        accept={isVideo ? 'video/*' : 'image/*'}
         onChange={(e) => setFile(e.target.files && e.target.files[0])}
       />
 

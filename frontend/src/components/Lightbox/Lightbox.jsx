@@ -20,12 +20,19 @@ export default function Lightbox({
   const [metas, setMetas] = useState(() => new Array(items.length));
   const swiperRef = useRef(null);
   const overlayRef = useRef(null);
-  const isTouchingPinchRef = useRef(false);
 
   useEffect(() => setCurrent(startIndex), [startIndex]);
   useEffect(() => {
     setMetas(new Array(items.length));
   }, [items]);
+
+  const setMetaAt = (index, meta) => {
+    setMetas((prev) => {
+      const copy = prev ? prev.slice() : new Array(items.length);
+      copy[index] = meta;
+      return copy;
+    });
+  };
 
   const fetchMeta = async (index) => {
     if (index < 0 || index >= items.length) return null;
@@ -35,35 +42,33 @@ export default function Lightbox({
       try {
         const maybe = await fetchOriginal(index);
         if (maybe && typeof maybe === 'object') {
-          setMetas((prev) => {
-            const copy = prev ? prev.slice() : new Array(items.length);
-            copy[index] = maybe;
-            return copy;
-          });
+          setMetaAt(index, maybe);
           return maybe;
         }
-      } catch {}
+      } catch (e) {
+        // ignore and fallback to API
+      }
     }
 
     try {
-      const previewKey = items[index].key; // 'preview/.../name.webp'
+      const previewKey = items[index].key; // e.g. 'preview/2023/event/video_10.webp' or 'preview/.../10.webp'
       const rel = previewKey.replace(/^preview\//, '');
       const baseNoExt = rel.replace(/\.[^.]+$/, '');
       const originalKey = `original_photo/${baseNoExt}.jpg`;
       const r = await fetch(
         `${API_ORIGINAL}?key=${encodeURIComponent(originalKey)}`,
-        { credentials: 'include' },
+        {
+          credentials: 'include',
+        },
       );
-      if (!r.ok) return null;
+      if (!r.ok) {
+        return null;
+      }
       const jd = await r.json();
       if (!jd) return null;
-      setMetas((prev) => {
-        const copy = prev ? prev.slice() : new Array(items.length);
-        copy[index] = jd;
-        return copy;
-      });
+      setMetaAt(index, jd);
       return jd;
-    } catch {
+    } catch (e) {
       return null;
     }
   };
@@ -93,165 +98,6 @@ export default function Lightbox({
     return () => document.removeEventListener('keydown', onKey);
   }, [onClose]);
 
-  useEffect(() => {
-    const overlay = overlayRef.current;
-    if (!overlay) return;
-
-    const isTouchDevice =
-      'ontouchstart' in window || window.matchMedia('(pointer:coarse)').matches;
-    if (!isTouchDevice) return;
-
-    let activeTouches = 0;
-    const getSwiper = () => swiperRef.current?.swiper;
-
-    const onTouchStart = (e) => {
-      activeTouches = e.touches ? e.touches.length : 0;
-      if (activeTouches === 2) {
-        isTouchingPinchRef.current = true;
-        const s = getSwiper();
-        if (s) s.allowTouchMove = false;
-        overlay.style.touchAction = 'auto';
-        overlay.style.webkitTouchCallout = 'auto';
-        overlay.style.webkitUserSelect = 'auto';
-      }
-    };
-
-    const onTouchEnd = (e) => {
-      const remaining = e.touches ? e.touches.length : 0;
-      activeTouches = remaining;
-      if (isTouchingPinchRef.current && remaining < 2) {
-        isTouchingPinchRef.current = false;
-        const s = getSwiper();
-        if (s) s.allowTouchMove = true;
-        overlay.style.touchAction = '';
-        overlay.style.webkitTouchCallout = '';
-        overlay.style.webkitUserSelect = '';
-      }
-    };
-
-    overlay.addEventListener('touchstart', onTouchStart, { passive: true });
-    overlay.addEventListener('touchend', onTouchEnd, { passive: true });
-    overlay.addEventListener('touchcancel', onTouchEnd, { passive: true });
-
-    return () => {
-      overlay.removeEventListener('touchstart', onTouchStart);
-      overlay.removeEventListener('touchend', onTouchEnd);
-      overlay.removeEventListener('touchcancel', onTouchEnd);
-      const s = getSwiper();
-      if (s) s.allowTouchMove = true;
-      overlay.style.touchAction = '';
-      overlay.style.webkitTouchCallout = '';
-      overlay.style.webkitUserSelect = '';
-    };
-  }, [items]);
-
-  useEffect(() => {
-    const overlay = overlayRef.current;
-    if (!overlay) return;
-
-    const scrollY = window.scrollY || window.pageYOffset || 0;
-    const previousBodyStyles = {
-      position: document.body.style.position || '',
-      top: document.body.style.top || '',
-      left: document.body.style.left || '',
-      right: document.body.style.right || '',
-      width: document.body.style.width || '',
-      overflow: document.body.style.overflow || '',
-    };
-
-    document.body.style.position = 'fixed';
-    document.body.style.top = `-${scrollY}px`;
-    document.body.style.left = '0';
-    document.body.style.right = '0';
-    document.body.style.width = '100%';
-    document.body.style.overflow = 'hidden';
-
-    const isEventInsideOverlay = (e) => {
-      try {
-        return overlay && overlay.contains(e.target);
-      } catch {
-        return false;
-      }
-    };
-
-    const onWheel = (e) => {
-      if (!isEventInsideOverlay(e)) {
-        e.preventDefault();
-      }
-    };
-    const onTouchMove = (e) => {
-      if (!isEventInsideOverlay(e)) {
-        e.preventDefault();
-      }
-    };
-
-    window.addEventListener('wheel', onWheel, {
-      passive: false,
-      capture: true,
-    });
-    window.addEventListener('touchmove', onTouchMove, {
-      passive: false,
-      capture: true,
-    });
-
-    const onKeyDown = (e) => {
-      const keys = [
-        'PageUp',
-        'PageDown',
-        'Home',
-        'End',
-        ' ',
-        'ArrowUp',
-        'ArrowDown',
-      ];
-      if (keys.includes(e.key) && !isEventInsideOverlay(e)) e.preventDefault();
-    };
-    window.addEventListener('keydown', onKeyDown, { capture: true });
-
-    return () => {
-      document.body.style.position = previousBodyStyles.position;
-      document.body.style.top = previousBodyStyles.top;
-      document.body.style.left = previousBodyStyles.left;
-      document.body.style.right = previousBodyStyles.right;
-      document.body.style.width = previousBodyStyles.width;
-      document.body.style.overflow = previousBodyStyles.overflow;
-      window.scrollTo(0, scrollY);
-      window.removeEventListener('wheel', onWheel, { capture: true });
-      window.removeEventListener('touchmove', onTouchMove, { capture: true });
-      window.removeEventListener('keydown', onKeyDown, { capture: true });
-    };
-  }, []);
-
-  useEffect(() => {
-    const lightboxParam = 'lightbox';
-    const searchParams = new URLSearchParams(window.location.search);
-
-    if (!searchParams.has(lightboxParam)) {
-      searchParams.set(lightboxParam, '1');
-      window.history.pushState(
-        { lightbox: true },
-        '',
-        '?' + searchParams.toString(),
-      );
-    }
-
-    const handlePopState = () => {
-      const params = new URLSearchParams(window.location.search);
-      if (!params.has(lightboxParam)) onClose();
-    };
-
-    window.addEventListener('popstate', handlePopState);
-
-    return () => {
-      window.removeEventListener('popstate', handlePopState);
-      const params = new URLSearchParams(window.location.search);
-      if (params.has(lightboxParam)) {
-        params.delete(lightboxParam);
-        window.history.replaceState({}, '', '?' + params.toString());
-      }
-    };
-  }, [onClose]);
-
   const RENDER_RADIUS = 2;
 
   const buildSrcSet = (meta) => {
@@ -272,6 +118,18 @@ export default function Lightbox({
 
   const sizesAttr =
     '(max-width:480px) 400px, (max-width:1280px) 1280px, (max-width:1920px) 1920px, 2560px';
+
+  const gatherVideoUrls = (meta) => {
+    if (!meta || !meta.videos) return [];
+    const order = ['1440', '1080', '720'];
+    const out = [];
+    for (const q of order) {
+      const v = meta.videos[q];
+      const url = typeof v === 'string' ? v : v?.url;
+      if (url) out.push({ res: q, url, key: v?.key || null });
+    }
+    return out;
+  };
 
   return (
     <div
@@ -306,12 +164,93 @@ export default function Lightbox({
             const srcFallback =
               (meta && (meta.preview?.url || meta.url)) || it.url;
             const srcSet = buildSrcSet(meta);
+            const isVideo = !!(meta?.isVideo || it.isVideo);
 
             return (
               <SwiperSlide key={it.key ?? i} className={styles.slide}>
                 {shouldRender ? (
                   <>
-                    {srcSet ? (
+                    {isVideo ? (
+                      <div className={styles.videoWrap}>
+                        {(() => {
+                          const vids = gatherVideoUrls(meta);
+                          if (vids.length === 0) {
+                            return (
+                              <video
+                                key={`video-fallback-${it.key || i}`}
+                                className={styles.video}
+                                controls
+                                preload="metadata"
+                                playsInline
+                                poster={meta?.preview?.url || it.url}
+                              >
+                                Ваш браузер не поддерживает видео.
+                              </video>
+                            );
+                          }
+
+                          const videoKey = vids.map((v) => v.url).join(',');
+                          return (
+                            <video
+                              key={videoKey}
+                              className={styles.video}
+                              controls
+                              preload="metadata"
+                              playsInline
+                              poster={meta?.preview?.url || it.url}
+                              // allow downloads / cross-origin if signed urls require it
+                              crossOrigin="anonymous"
+                            >
+                              {vids.map((v) => {
+                                const lower = String(v.url).toLowerCase();
+                                const type = lower.endsWith('.webm')
+                                  ? 'video/webm'
+                                  : lower.endsWith('.ogg')
+                                    ? 'video/ogg'
+                                    : 'video/mp4';
+                                if (!v.url) {
+                                  console.warn(
+                                    'Empty video url for',
+                                    it.key,
+                                    v,
+                                  );
+                                  return null;
+                                }
+                                return (
+                                  <source
+                                    key={v.res}
+                                    src={v.url}
+                                    type={type}
+                                    data-res={v.res}
+                                  />
+                                );
+                              })}
+                              Ваш браузер не поддерживает видео.
+                            </video>
+                          );
+                        })()}
+
+                        {meta && meta.videos
+                          ? (() => {
+                              const vids = gatherVideoUrls(meta);
+                              if (vids.length === 0) return null;
+                              const best = vids[0];
+                              return (
+                                <a
+                                  className={styles.download}
+                                  href={best.url}
+                                  target="_blank"
+                                  rel="noreferrer noopener"
+                                  aria-label="Скачать видео"
+                                  onClick={(e) => {}}
+                                >
+                                  <Hd />
+                                </a>
+                              );
+                            })()
+                          : null}
+                      </div>
+                    ) : srcSet ? (
                       <picture>
                         <source srcSet={srcSet} sizes={sizesAttr} />
                         <img
@@ -335,8 +274,8 @@ export default function Lightbox({
                     )}
 
                     {meta &&
-                    (meta.original?.url ||
-                      typeof meta.original === 'string') ? (
+                    (meta.original?.url || typeof meta.original === 'string') &&
+                    !isVideo ? (
                       <a
                         className={styles.download}
                         href={meta.original?.url || meta.original}
@@ -359,7 +298,7 @@ export default function Lightbox({
         </Swiper>
       </div>
 
-      <button onClick={onClose} className={styles.close}>
+      <button onClick={onClose} className={styles.close} aria-label="Закрыть">
         <X />
       </button>
     </div>

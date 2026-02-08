@@ -29,6 +29,7 @@
 }
 
 .item {
+  position: relative;
   width: 100%;
   height: 100%;
   border-radius: 5px 10px;
@@ -45,6 +46,34 @@
   height: 100%;
   object-fit: cover;
   object-position: center;
+}
+
+.playOverlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.playBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  padding: 6px;
+  background: rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(2px);
+  color: #fff;
+}
+
+.playIcon {
+  width: 36px;
+  height: 36px;
+  opacity: 0.98;
+  color: inherit;
 }
 
 h1 {

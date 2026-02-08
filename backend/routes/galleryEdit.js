@@ -67,8 +67,15 @@ router.post('/upload', upload.single('image'), async (req, res) => {
             return res.status(400).json({ error: 'No file uploaded' });
         }
 
+        const isVideo = String(req.body.video || '').toLowerCase();
+        const videoFlag = isVideo === 'true';
+
         const buffer = req.file.buffer;
-        const baseName = makeNumericName(req);
+        let baseName = makeNumericName(req);
+        if (videoFlag) {
+            baseName = `video_${baseName}`;
+        }
+
         const origExt = path.extname(req.file.originalname) || '.jpg';
         const originalKey = `original_photo/${folderPath}/${baseName}${origExt}`;
         const statusKey = `processing/${folderPath}/${baseName}.json`;
@@ -88,7 +95,10 @@ router.post('/upload', upload.single('image'), async (req, res) => {
             global._bgQueue
                 .push(async () => {
                     try {
-                        await uploadToS3(buffer, originalKey);
+                        if (!videoFlag) {
+                            await uploadToS3(buffer, originalKey);
+                        }
+
                         await uploadToS3(
                             Buffer.from(
                                 JSON.stringify({
@@ -100,54 +110,100 @@ router.post('/upload', upload.single('image'), async (req, res) => {
                         );
 
                         const webpOptions = { quality: 85, effort: 6 };
-                        const sizes = [
-                            { dir: 'preview', width: 400 },
-                            { dir: 'screen-1280', width: 1280 },
-                            { dir: 'screen-1920', width: 1920 },
-                            { dir: 'screen-2560', width: 2560 },
-                        ];
 
-                        const maxWidth = Math.max(...sizes.map((s) => s.width));
-                        const baseBuffer = await sharp(buffer)
-                            .resize({
-                                width: maxWidth,
-                                withoutEnlargement: true,
-                                fit: 'inside',
-                            })
-                            .toBuffer();
+                        if (videoFlag) {
+                            const previewDir = 'preview';
+                            const previewWidth = 400;
+                            const baseBuffer = await sharp(buffer)
+                                .resize({
+                                    width: previewWidth,
+                                    withoutEnlargement: true,
+                                    fit: 'inside',
+                                })
+                                .toBuffer();
 
-                        const uploadedKeys = [];
-                        for (const s of sizes) {
-                            const outKey = `${s.dir}/${folderPath}/${baseName}.webp`;
-
-                            const resized =
-                                s.width === maxWidth
-                                    ? baseBuffer
-                                    : await sharp(baseBuffer)
-                                          .resize({
-                                              width: s.width,
-                                              withoutEnlargement: true,
-                                              fit: 'inside',
-                                          })
-                                          .toBuffer();
-
-                            const webpBuf = await sharp(resized)
+                            const webpBuf = await sharp(baseBuffer)
                                 .webp(webpOptions)
                                 .toBuffer();
-                            await uploadToS3(webpBuf, outKey);
-                            uploadedKeys.push(outKey);
-                        }
 
-                        await uploadToS3(
-                            Buffer.from(
-                                JSON.stringify({
-                                    status: 'done',
-                                    finishedAt: new Date().toISOString(),
-                                    keys: uploadedKeys,
-                                }),
-                            ),
-                            statusKey,
-                        );
+                            const previewKey = `${previewDir}/${folderPath}/${baseName}.webp`;
+                            await uploadToS3(webpBuf, previewKey);
+
+                            const VIDEO_DIRS = [
+                                'video_1440',
+                                'video_1080',
+                                'video_720',
+                            ];
+                            const placeholder = Buffer.from('');
+                            const createdKeys = [previewKey];
+                            for (const d of VIDEO_DIRS) {
+                                const placeholderKey = `${d}/${folderPath}/.placeholder`;
+                                await uploadToS3(placeholder, placeholderKey);
+                                createdKeys.push(placeholderKey);
+                            }
+
+                            await uploadToS3(
+                                Buffer.from(
+                                    JSON.stringify({
+                                        status: 'done',
+                                        finishedAt: new Date().toISOString(),
+                                        keys: createdKeys,
+                                    }),
+                                ),
+                                statusKey,
+                            );
+                        } else {
+                            const sizes = [
+                                { dir: 'preview', width: 400 },
+                                { dir: 'screen-1280', width: 1280 },
+                                { dir: 'screen-1920', width: 1920 },
+                                { dir: 'screen-2560', width: 2560 },
+                            ];
+
+                            const maxWidth = Math.max(
+                                ...sizes.map((s) => s.width),
+                            );
+                            const baseBuffer = await sharp(buffer)
+                                .resize({
+                                    width: maxWidth,
+                                    withoutEnlargement: true,
+                                    fit: 'inside',
+                                })
+                                .toBuffer();
+
+                            const uploadedKeys = [];
+                            for (const s of sizes) {
+                                const outKey = `${s.dir}/${folderPath}/${baseName}.webp`;
+
+                                const resized =
+                                    s.width === maxWidth
+                                        ? baseBuffer
+                                        : await sharp(baseBuffer)
+                                              .resize({
+                                                  width: s.width,
+                                                  withoutEnlargement: true,
+                                                  fit: 'inside',
+                                              })
+                                              .toBuffer();
+
+                                const webpBuf = await sharp(resized)
+                                    .webp(webpOptions)
+                                    .toBuffer();
+                                await uploadToS3(webpBuf, outKey);
+                                uploadedKeys.push(outKey);
+                            }
+
+                            await uploadToS3(
+                                Buffer.from(
+                                    JSON.stringify({
+                                        status: 'done',
+                                        finishedAt: new Date().toISOString(),
+                                        keys: uploadedKeys,
+                                    }),
+                                ),
+                                statusKey,
+                            );
+                        }
                     } catch (err) {
                         console.error('Background processing failed:', err);
                         try {

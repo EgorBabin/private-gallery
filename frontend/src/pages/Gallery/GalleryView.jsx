@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams } from 'react-router-dom';
+import { Play } from 'lucide-react';
 import Lightbox from '@/components/Lightbox/Lightbox';
 import { useTitle } from '@/hooks/useTitle';
 import styles from './GalleryView.module.css';
@@ -102,7 +103,25 @@ export default function GalleryView() {
           return;
         }
         const d = await res.json();
-        const newItems = d.items || [];
+        let newItems = d.items || [];
+
+        const getNumericIndexFromKey = (k) => {
+          if (!k) return 0;
+          const baseWithExt = String(k).split('/').pop();
+          const rawBase = baseWithExt
+            .replace(/^video_/, '')
+            .replace(/\.[^.]+$/, ''); // "10"
+          const m = rawBase.match(/(\d+)$/);
+          return m ? Number(m[1]) : 0;
+        };
+
+        newItems = newItems.slice().sort((a, b) => {
+          const ai = getNumericIndexFromKey(a.key || '');
+          const bi = getNumericIndexFromKey(b.key || '');
+          if (ai === bi) return (a.key || '').localeCompare(b.key || '');
+          return ai - bi;
+        });
+
         setItems(newItems);
 
         setOriginalUrls((prev) => {
@@ -249,6 +268,7 @@ export default function GalleryView() {
           <div className={styles.grid}>
             {items.map((it, idx) => {
               const key = it.key ?? `${prefix}${idx}`;
+              const isVideo = !!it.isVideo;
               return (
                 <div
                   key={key}
@@ -256,18 +276,29 @@ export default function GalleryView() {
                   onClick={() => open(idx)}
                   role="button"
                   tabIndex={0}
+                  aria-label={isVideo ? 'Открыть видео' : 'Открыть изображение'}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') open(idx);
+                  }}
                 >
                   <img
                     src={it.url}
                     loading="lazy"
                     decoding="async"
-                    alt={it.key ?? `${prefix}${idx}`}
+                    alt={it.name ?? it.key ?? `${prefix}${idx}`}
                     className={styles.img}
                     onError={(e) => {
                       e.currentTarget.style.opacity = '0.6';
                       e.currentTarget.style.filter = 'grayscale(1)';
                     }}
                   />
+                  {isVideo && (
+                    <div className={styles.playOverlay} aria-hidden="true">
+                      <div className={styles.playBadge}>
+                        <Play className={styles.playIcon} />
+                      </div>
+                    </div>
+                  )}
                 </div>
               );
             })}
