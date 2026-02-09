@@ -1,9 +1,9 @@
 .progressBar {
-  height: 0.35rem;
+  height: 5px;
   width: 0%;
   position: fixed;
-  border-radius: 0 0 0.35rem 0;
-  top: 0;
+  border-radius: 0 4px 0 0;
+  bottom: 0;
   z-index: 200;
 
   background: linear-gradient(

@@ -3,34 +3,31 @@
 :root {
   /* Базовые (нейтральные) */
   --color-text-primary: rgb(255, 255, 255); /* Текст главный */
-  --color-text-secondary: rgb(36, 36, 36); /* Текст второстепенный */
+  --color-text-placeholder: rgba(255, 255, 255, 0.55);
+  --color-text-secondary: #bfc6d2; /* Текст второстепенный */
   --color-text-secondary: ; /* Текст-подсказка / плейсхолдер */
-  --color-background-default: rgb(20, 20, 20); /* Фон страницы */
-  --color-background-surface: rgb(32, 35, 42); /* Фон контейнeра / карточки */
-  --color-border: ; /* Граница / разделитель */
+  --color-background-default: #0f1113;
+  --color-background-surface: #1f242a;
+  --color-border: rgba(255, 255, 255, 0.06);
 
   /* Страница */
   --color-login-btn-telegram: rgb(95, 158, 160); /* Кнопка входа - telegram */
   --color-login-btn-yandex: rgb(165, 54, 42); /* Кнопка входа - yandex */
-  --color-users-border: rgb(150, 150, 150); /* Граница форм users*/
-  --color-users-bg-field: rgb(17, 17, 17); /*  */
-  --color-users-border-focus: rgb(
-    38,
-    132,
-    255
-  ); /* Граница при фокусе на формы - users */
+  --color-users-border: #969696;
+  --color-users-bg-field: #0f1113;
+  --color-users-border-focus: rgba(38, 132, 255, 1);
   --color-users-box-shadow-focus: rgba(
     38,
     132,
     255,
-    0.3
+    0.18
   ); /* Тень при фокусе - users */
-  --color-users-danger: rgb(102, 0, 0); /* Кнопка удаления - users */
-  --color-users-danger-hover: rgb(
-    200,
-    0,
-    0
-  ); /* Кнопка удаления наведена - users */
+  --color-users-danger: #660000;
+  --color-users-danger-hover: #c80000; /* Кнопка удаления наведена - users */
+
+  --accent-1: #267fff; /* синий фокус */
+  --accent-2: #ff6b6b; /* тёплый акцент */
+  --muted: #93a0b3;
 
   /* Компоненты */
   --color-header-bg: rgba(0, 0, 0, 0.2); /* Фон -  header*/
@@ -41,5 +38,6 @@
   --color-scroll-progress-bar-bg2: rgba(254, 180, 123, 0.5);
   --color-scroll-progress-bar-box-shadow: rgba(255, 107, 107, 0.2);
   --color-: ;
-  --color-: ;
+  --color-:    
+;
 }

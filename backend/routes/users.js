@@ -1,5 +1,6 @@
 import express from 'express';
 import pool from '../db.js';
+import { logAction } from '../utils/logger.js';
 
 const router = express.Router();
 
@@ -72,10 +73,12 @@ router.post('/', async (req, res) => {
             'INSERT INTO users (username, email, telegramID, role) VALUES ($1, $2, $3, $4) RETURNING *',
             [username, email, telegramID, role || 'user'],
         );
+        logAction(req, 'Добавлен новый пользователь', '#users.js');
         res.json(normalizeUser(rows[0]));
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'Failed to create user' });
+        logAction(req, 'Failed to create user', '#users.js');
     }
 });
 
@@ -85,9 +88,11 @@ router.delete('/:id', async (req, res) => {
     try {
         await pool.query('DELETE FROM users WHERE id = $1', [id]);
         res.json({ message: 'User deleted' });
+        logAction(req, 'User deleted', '#users.js');
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'Failed to delete user' });
+        logAction(req, 'Failed to delete user', '#users.js');
     }
 });
 
@@ -101,12 +106,15 @@ router.put('/:id', async (req, res) => {
             [username, email, role, telegramID, id],
         );
         if (rows.length === 0) {
+            logAction(req, 'User not found', '#users.js');
             return res.status(404).json({ error: 'User not found' });
         }
         res.json(normalizeUser(rows[0]));
+        logAction(req, 'User update', '#users.js');
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'Failed to update user' });
+        logAction(req, 'Failed to update user', '#users.js');
     }
 });
 

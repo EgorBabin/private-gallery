@@ -8,6 +8,7 @@ import {
     listObjects,
     getSignedUrlForKey,
 } from '../utils/s3Client.js';
+import { logAction } from '../utils/logger.js';
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -61,9 +62,21 @@ router.post('/upload', upload.single('image'), async (req, res) => {
     try {
         const folderPath = req.body.path;
         if (!folderPath) {
+            logAction(
+                req,
+                'Missing path',
+                `${error}
+                #galleryEdit.js #upload #error`,
+            );
             return res.status(400).json({ error: 'Missing path' });
         }
         if (!req.file) {
+            logAction(
+                req,
+                'No file uploaded',
+                `${error}
+                #galleryEdit.js #upload #error`,
+            );
             return res.status(400).json({ error: 'No file uploaded' });
         }
 
@@ -85,6 +98,12 @@ router.post('/upload', upload.single('image'), async (req, res) => {
             filename: baseName,
             statusKey,
         });
+        logAction(
+            req,
+            'Uploaded new file',
+            `${baseName}
+            #galleryEdit.js #upload`,
+        );
         try {
             res.flushHeaders?.();
         } catch (e) {
@@ -203,9 +222,21 @@ router.post('/upload', upload.single('image'), async (req, res) => {
                                 ),
                                 statusKey,
                             );
+                            logAction(
+                                req,
+                                'Uploaded file done',
+                                `${uploadedKeys}
+                                #galleryEdit.js #upload`,
+                            );
                         }
                     } catch (err) {
                         console.error('Background processing failed:', err);
+                        logAction(
+                            req,
+                            'Background processing failed',
+                            `${err}
+                            #galleryEdit.js #upload #error`,
+                        );
                         try {
                             await uploadToS3(
                                 Buffer.from(
@@ -219,12 +250,24 @@ router.post('/upload', upload.single('image'), async (req, res) => {
                             );
                         } catch (e) {
                             console.error('Failed to write error status:', e);
+                            logAction(
+                                req,
+                                'Failed to write error status:',
+                                `${e}
+                                #galleryEdit.js #upload #error`,
+                            );
                         }
                         throw err;
                     }
                 })
                 .catch((err) => {
                     console.error('Queue push failed:', err);
+                    logAction(
+                        req,
+                        'Queue push failed',
+                        `${err}
+                        #galleryEdit.js #upload #error`,
+                    );
                 });
         });
 
@@ -233,6 +276,12 @@ router.post('/upload', upload.single('image'), async (req, res) => {
         console.error('Upload route error:', err);
         if (!res.headersSent) {
             res.status(500).json({ error: 'Upload failed' });
+            logAction(
+                req,
+                'Upload failed',
+                `${err}
+                #galleryEdit.js #upload #error`,
+            );
         }
     }
 });
@@ -243,6 +292,12 @@ router.get('/reconcile', async (req, res) => {
         const limit = Number(req.query.limit || req.body?.limit || 0) || 0; // 0 = no limit
 
         if (!prefix) {
+            logAction(
+                req,
+                'Prefix required',
+                `${error}
+                #galleryEdit.js #reconcile #error`,
+            );
             return res.status(400).json({ error: 'prefix required' });
         }
 
@@ -265,6 +320,12 @@ router.get('/reconcile', async (req, res) => {
             statusKey,
         );
         res.status(202).json({ status: 'accepted', statusKey });
+        logAction(
+            req,
+            'accepted',
+            `${statusKey}
+            #galleryEdit.js #reconcile`,
+        );
 
         setImmediate(async () => {
             try {
@@ -284,6 +345,11 @@ router.get('/reconcile', async (req, res) => {
                             }),
                         ),
                         statusKey,
+                    );
+                    logAction(
+                        req,
+                        'done',
+                        'no originals #galleryEdit.js #reconcile',
                     );
                     return;
                 }

@@ -115,7 +115,7 @@ app.use((req, res, next) => {
             logAction(
                 req,
                 '⚠️ Подозрительная активность: IP или UA изменены',
-                'server.js',
+                '#server.js',
             );
             console.warn('⚠️ Подозрительная активность: IP или UA изменены');
             req.session.destroy(() => {

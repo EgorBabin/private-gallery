@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import { Play } from 'lucide-react';
+import { useCheckSession } from '@/hooks/useCheckSession';
 import Lightbox from '@/components/Lightbox/Lightbox';
 import { useTitle } from '@/hooks/useTitle';
 import styles from './GalleryView.module.css';
@@ -18,6 +19,15 @@ export default function GalleryView() {
 
   const scrollRef = useRef(null);
   useTitle(`${year} ${category}`);
+
+  const { authenticated, loading: sessionLoading } = useCheckSession();
+  const nav = useNavigate();
+
+  useEffect(() => {
+    if (!sessionLoading && !authenticated) {
+      nav('/login');
+    }
+  }, [sessionLoading, authenticated, nav]);
 
   const pickUrlFromMeta = useCallback((meta) => {
     if (!meta) return null;

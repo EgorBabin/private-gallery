@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useCsrfFetch } from '@/hooks/useCsrfFetch';
+import { useCheckSession } from '@/hooks/useCheckSession';
 import styles from './GalleryEdit.module.css';
 
 export default function UploadForm() {
@@ -14,6 +15,15 @@ export default function UploadForm() {
   const [isVideo, setIsVideo] = useState(false);
 
   const location = useLocation();
+
+  const { authenticated, loading: sessionLoading } = useCheckSession();
+  const nav = useNavigate();
+
+  useEffect(() => {
+    if (!sessionLoading && !authenticated) {
+      nav('/login');
+    }
+  }, [sessionLoading, authenticated, nav]);
 
   useEffect(() => {
     if (!file) {
@@ -47,6 +57,11 @@ export default function UploadForm() {
   const handleUpload = async () => {
     if (!file) {
       setStatus('Прикрепите файл');
+      return;
+    }
+
+    if (!file.type.startsWith('image/')) {
+      setStatus('Можно загружать только изображения (превью)');
       return;
     }
 
@@ -162,7 +177,7 @@ export default function UploadForm() {
 
       <input
         type="file"
-        accept={isVideo ? 'video/*' : 'image/*'}
+        accept="image/*"
         onChange={(e) => setFile(e.target.files && e.target.files[0])}
       />
 

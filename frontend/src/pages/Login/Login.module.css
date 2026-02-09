@@ -1,11 +1,140 @@
-a {
+.div {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  width: 100%;
+  max-width: 480px;
+  margin: 6px 0;
+}
+
+.checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent);
+  border: 1px solid var(--color-border);
   color: var(--color-text-primary);
+  font-size: 0.95rem;
+  cursor: pointer;
+  user-select: none;
+  transition:
+    transform 0.08s ease,
+    box-shadow 0.12s ease;
 }
 
-a.telegram {
-  background-color: var(--color-login-btn-telegram);
+.checkbox input[type='checkbox'] {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--accent-1);
+  cursor: pointer;
+  flex: 0 0 auto;
+  border-radius: 4px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35) inset;
 }
 
-a.yandex {
-  background-color: var(--color-login-btn-yandex);
+.checkbox:active {
+  transform: translateY(1px);
+}
+.checkbox:focus-within {
+  box-shadow: 0 6px 20px var(--color-users-box-shadow-focus);
+}
+
+.telegram {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.02),
+    rgba(0, 0, 0, 0.04)
+  );
+  min-width: 110px;
+  text-align: center;
+  box-shadow: 0 8px 24px rgba(2, 6, 12, 0.45);
+}
+
+.telegram a,
+.telegram > a {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  text-decoration: none;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--color-login-btn-telegram);
+  color: var(--color-text-primary);
+  font-weight: 700;
+  box-shadow: 0 8px 20px rgba(95, 158, 160, 0.14);
+  transition:
+    transform 0.12s ease,
+    box-shadow 0.12s ease,
+    opacity 0.12s ease;
+}
+
+.telegram a:hover {
+  transform: translateY(-2px);
+}
+.telegram a:active {
+  transform: translateY(0);
+  opacity: 0.95;
+}
+
+.yandex {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 14px;
+  border-radius: 10px;
+  text-decoration: none;
+  background: var(--color-login-btn-yandex);
+  color: var(--color-text-primary);
+  font-weight: 700;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  box-shadow: 0 8px 20px rgba(165, 54, 42, 0.12);
+  transition:
+    transform 0.12s ease,
+    box-shadow 0.12s ease,
+    opacity 0.12s ease;
+  min-width: 90px;
+}
+
+.yandex:hover {
+  transform: translateY(-2px);
+}
+.yandex:active {
+  transform: translateY(0);
+  opacity: 0.95;
+}
+
+.telegram > .telegram-widget,
+.telegram > iframe,
+.telegram > div {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+@media (max-width: 520px) {
+  .div {
+    gap: 8px;
+  }
+  .telegram,
+  .yandex,
+  .checkbox {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+  .telegram a,
+  .yandex {
+    width: 100%;
+    justify-content: center;
+  }
 }

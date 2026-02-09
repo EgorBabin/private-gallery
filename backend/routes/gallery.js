@@ -5,6 +5,7 @@ import {
     getSignedUrlForKey,
 } from '../utils/s3Client.js';
 import { parseIndexFromKey } from '../utils/filename.js';
+import { logAction } from '../utils/logger.js';
 import path from 'path';
 
 const router = express.Router();
@@ -73,9 +74,16 @@ router.get('/cards', async (req, res) => {
         }
 
         res.json({ cards });
+        logAction(req, 'Get cards', '#gallery.js #cards');
     } catch (err) {
         console.error('cards error', err);
         res.status(500).json({ error: err.message });
+        logAction(
+            req,
+            'Cards error',
+            `${err}
+            #gallery.js #cards #error`,
+        );
     }
 });
 
@@ -150,9 +158,16 @@ router.get('/previews', async (req, res) => {
             isTruncated: !!data.IsTruncated,
             nextContinuationToken: data.NextContinuationToken || null,
         });
+        logAction(req, 'Get previews', '#gallery.js #previews');
     } catch (err) {
         console.error('previews error', err);
         res.status(500).json({ error: err.message });
+        logAction(
+            req,
+            'Previews error',
+            `${err}
+            #gallery.js #previews #error`,
+        );
     }
 });
 
@@ -223,6 +238,7 @@ router.get('/original', async (req, res) => {
                 720: { key: videoKeys[2], url: videoUrls[2] },
             };
 
+            logAction(req, 'Get original', '#gallery.js #original #video');
             return res.json({
                 isVideo: true,
                 preview: { key: previewKey, url: previewUrl },
@@ -248,9 +264,16 @@ router.get('/original', async (req, res) => {
             screen1920: { key: screenKeys[1], url: urls[3] },
             screen2560: { key: screenKeys[2], url: urls[4] },
         });
+        logAction(req, 'Get original', '#gallery.js #original #photo');
     } catch (err) {
         console.error('original error', err);
         res.status(500).json({ error: err.message || 'Internal error' });
+        logAction(
+            req,
+            'Original error',
+            `${err}
+            #gallery.js #error`,
+        );
     }
 });
 
