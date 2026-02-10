@@ -7,10 +7,13 @@ import { useTitle } from '@/hooks/useTitle';
 import styles from './GalleryView.module.css';
 
 const API = '/api/gallery';
+const LS_KEY = 'gallery_items_cache';
 
 export default function GalleryView() {
   const { year, category } = useParams();
   const prefix = `${year}/${category}/`;
+  const prefixKey = `${year}/${category}`;
+
   const [items, setItems] = useState([]);
   const [openIndex, setOpenIndex] = useState(-1);
 
@@ -99,6 +102,26 @@ export default function GalleryView() {
     const controller = new AbortController();
     let mounted = true;
 
+    try {
+      const raw = localStorage.getItem(LS_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (
+          parsed &&
+          parsed[prefixKey] &&
+          Array.isArray(parsed[prefixKey].items) &&
+          mounted
+        ) {
+          const cachedItems = parsed[prefixKey].items;
+          setItems(cachedItems);
+          setOriginalUrls(new Array(cachedItems.length));
+          setOriginalMetas(new Array(cachedItems.length));
+        }
+      }
+    } catch (e) {
+      // ignore parse errors
+    }
+
     (async () => {
       try {
         const res = await fetch(
@@ -120,7 +143,7 @@ export default function GalleryView() {
           const baseWithExt = String(k).split('/').pop();
           const rawBase = baseWithExt
             .replace(/^video_/, '')
-            .replace(/\.[^.]+$/, ''); // "10"
+            .replace(/\.[^.]+$/, '');
           const m = rawBase.match(/(\d+)$/);
           return m ? Number(m[1]) : 0;
         };
@@ -146,6 +169,13 @@ export default function GalleryView() {
             arr[i] = prev[i];
           return arr;
         });
+
+        try {
+          const rootRaw = localStorage.getItem(LS_KEY);
+          const root = rootRaw ? JSON.parse(rootRaw) : {};
+          root[prefixKey] = { items: newItems, updatedAt: Date.now() };
+          localStorage.setItem(LS_KEY, JSON.stringify(root));
+        } catch (e) {}
       } catch (e) {
         if (e.name === 'AbortError') return;
         if (!mounted) return;
@@ -159,7 +189,7 @@ export default function GalleryView() {
       mounted = false;
       controller.abort();
     };
-  }, [prefix]);
+  }, [prefix, prefixKey]);
 
   const open = useCallback(
     async (index) => {
