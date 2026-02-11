@@ -108,36 +108,39 @@ export default function Header() {
   };
 
   return (
-    <header className={styles.header}>
-      <nav className={styles.nav}>
-        <Link
-          aria-label="Главная"
-          onClick={handleMainClick}
-          title={
-            isRoot
-              ? scrolled
-                ? 'Вверх'
-                : 'Перезагрузить'
-              : scrolled
-                ? 'Вверх'
-                : 'Перейти на главную'
-          }
-        >
-          {scrolled ? (
-            <ArrowUpToLine strokeWidth={2} />
-          ) : (
-            <Film strokeWidth={2} />
-          )}
-        </Link>
+    <>
+      <div className={styles.viewportGradient} aria-hidden="true" />
+      <header className={styles.header}>
+        <nav className={styles.nav}>
+          <Link
+            aria-label="Главная"
+            onClick={handleMainClick}
+            title={
+              isRoot
+                ? scrolled
+                  ? 'Вверх'
+                  : 'Перезагрузить'
+                : scrolled
+                  ? 'Вверх'
+                  : 'Перейти на главную'
+            }
+          >
+            {scrolled ? (
+              <ArrowUpToLine strokeWidth={2} />
+            ) : (
+              <Film strokeWidth={2} />
+            )}
+          </Link>
 
-        <Link to={editPath} onClick={() => vibrate('click')}>
-          <FolderCog />
-        </Link>
+          <Link to={editPath} onClick={() => vibrate('click')}>
+            <FolderCog />
+          </Link>
 
-        <Link to="/admin" onClick={() => vibrate('click')}>
-          <Users />
-        </Link>
-      </nav>
-    </header>
+          <Link to="/admin" onClick={() => vibrate('click')}>
+            <Users />
+          </Link>
+        </nav>
+      </header>
+    </>
   );
 }

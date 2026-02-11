@@ -19,8 +19,10 @@ export default function GalleryView() {
 
   const [originalUrls, setOriginalUrls] = useState([]);
   const [originalMetas, setOriginalMetas] = useState([]);
+  const [gridCols, setGridCols] = useState(0);
 
   const scrollRef = useRef(null);
+  const gridRef = useRef(null);
   useTitle(`${year} ${category}`);
 
   const { authenticated, loading: sessionLoading } = useCheckSession();
@@ -191,6 +193,51 @@ export default function GalleryView() {
     };
   }, [prefix, prefixKey]);
 
+  useEffect(() => {
+    const gridEl = gridRef.current;
+    if (!gridEl) return undefined;
+
+    const detectColumns = () => {
+      const nodes = gridEl.querySelectorAll(`.${styles.item}`);
+      if (!nodes.length) {
+        setGridCols(0);
+        return;
+      }
+
+      const firstTop = nodes[0].offsetTop;
+      let cols = 0;
+      for (const node of nodes) {
+        if (node.offsetTop !== firstTop) break;
+        cols += 1;
+      }
+      setGridCols((prev) => (prev === cols ? prev : cols));
+    };
+
+    detectColumns();
+
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', detectColumns);
+      return () => window.removeEventListener('resize', detectColumns);
+    }
+
+    const ro = new ResizeObserver(() => {
+      requestAnimationFrame(detectColumns);
+    });
+    ro.observe(gridEl);
+
+    return () => ro.disconnect();
+  }, [items.length]);
+
+  const gridClassName = [
+    styles.grid,
+    gridCols === 2 ? styles.cols2 : '',
+    gridCols === 3 ? styles.cols3 : '',
+    gridCols === 4 ? styles.cols4 : '',
+    gridCols >= 5 ? styles.cols5 : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
+
   const open = useCallback(
     async (index) => {
       if (index < 0 || index >= items.length) return;
@@ -293,7 +340,7 @@ export default function GalleryView() {
 
       <div className={styles.gridWrap} ref={scrollRef}>
         {items.length === 0 ? (
-          <div className={styles.grid}>
+          <div className={gridClassName} ref={gridRef}>
             {Array.from({ length: 12 }).map((_, i) => (
               <div
                 key={`skeleton-${i}`}
@@ -305,7 +352,7 @@ export default function GalleryView() {
             ))}
           </div>
         ) : (
-          <div className={styles.grid}>
+          <div className={gridClassName} ref={gridRef}>
             {items.map((it, idx) => {
               const key = it.key ?? `${prefix}${idx}`;
               const isVideo = !!it.isVideo;

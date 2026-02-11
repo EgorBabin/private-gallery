@@ -1,3 +1,18 @@
+.viewportGradient {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: clamp(80px, 14vh, 100px);
+  background: linear-gradient(
+    to top,
+    var(--color-header-bg-gradient) 0%,
+    rgba(0, 0, 0, 0) 100%
+  );
+  pointer-events: none;
+  z-index: 40;
+}
+
 .header {
   z-index: 50;
   position: fixed;
