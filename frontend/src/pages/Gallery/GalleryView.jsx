@@ -327,10 +327,6 @@ export default function GalleryView() {
                     decoding="async"
                     alt={it.name ?? it.key ?? `${prefix}${idx}`}
                     className={styles.img}
-                    onError={(e) => {
-                      e.currentTarget.style.opacity = '0.6';
-                      e.currentTarget.style.filter = 'grayscale(1)';
-                    }}
                   />
                   {isVideo && (
                     <div className={styles.playOverlay} aria-hidden="true">

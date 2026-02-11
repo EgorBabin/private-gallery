@@ -17,7 +17,6 @@ import usersRoutes from './routes/users.js';
 import telegramRoutes from './routes/telegram.js';
 import yandexRoutes from './routes/yandex.js';
 import authCheck from './utils/authCheck.js';
-import { logAction } from './utils/logger.js';
 
 import checkSession from './utils/checkSession.js';
 
@@ -25,6 +24,7 @@ import galleryRoutes from './routes/gallery.js';
 import galleryEditRoutes from './routes/galleryEdit.js';
 
 const app = express();
+const IS_DEBUG_LOGS = (process.env.LOG_LEVEL || '').toLowerCase() === 'debug';
 
 app.set('trust proxy', 1);
 
@@ -32,14 +32,12 @@ app.use(helmet());
 
 app.use(cookieParser());
 
-// for local use
 app.use(
     cors({
-        origin: process.env.FRONTEND_URL, // фронт
-        credentials: true, // чтобы работали cookies
+        origin: process.env.FRONTEND_URL,
+        credentials: true,
     }),
 );
-// // for local use
 
 app.use(express.json());
 
@@ -52,12 +50,12 @@ app.use(
             createTableIfMissing: true,
         }),
         secret: process.env.SESSION_SECRET,
-        resave: true,
+        resave: false,
         saveUninitialized: false,
-        rolling: true,
+        rolling: false,
         cookie: {
             httpOnly: true,
-            secure: true, // в проде — true // for local use
+            secure: true,
             sameSite: 'lax',
             maxAge: 1000 * 60 * 30, // 30 минут по умолчанию
         },
@@ -65,13 +63,13 @@ app.use(
     }),
 );
 
-// for local use
-app.use((req, res, next) => {
-    console.log('COOKIE _csrf:', req.cookies._csrf);
-    console.log('HEADER X-CSRF-Token:', req.get('X-CSRF-Token'));
-    next();
-});
-// // for local use
+if (IS_DEBUG_LOGS) {
+    app.use((req, res, next) => {
+        console.log('COOKIE _csrf:', req.cookies._csrf);
+        console.log('HEADER X-CSRF-Token:', req.get('X-CSRF-Token'));
+        next();
+    });
+}
 
 app.use(
     csurf({
@@ -84,6 +82,7 @@ app.use(
 );
 
 app.use((err, req, res, next) => {
+    void next;
     if (err.code === 'EBADCSRFTOKEN') {
         return res.status(403).json({ error: 'Invalid CSRF token' });
     }
@@ -95,40 +94,6 @@ app.get('/api/csrf-token', (req, res) => {
 });
 
 app.use(useragent.express());
-// 🔒 Middleware проверки IP/UA
-app.use((req, res, next) => {
-    console.log('Сессия:', req.session);
-    if (req.session.user) {
-        const currentIp = (req.headers['x-forwarded-for'] || req.ip || '')
-            .toString()
-            .split(',')[0]
-            .trim();
-        const currentUA = req.headers['user-agent'];
-
-        const storedIp = req.session.ip;
-        const storedUA = req.session.ua;
-
-        if (!storedIp || !storedUA) {
-            req.session.ip = currentIp;
-            req.session.ua = currentUA;
-        } else if (storedIp !== currentIp || storedUA !== currentUA) {
-            logAction(
-                req,
-                '⚠️ Подозрительная активность: IP или UA изменены',
-                '#server.js',
-            );
-            console.warn('⚠️ Подозрительная активность: IP или UA изменены');
-            req.session.destroy(() => {
-                res.clearCookie(process.env.SESSION);
-                return res
-                    .status(401)
-                    .json({ error: 'Сессия недействительна' });
-            });
-            return;
-        }
-    }
-    next();
-});
 
 // Подключаем роуты
 app.use('/api/', checkWork);
@@ -141,6 +106,7 @@ app.use('/api/gallery', checkSession(), galleryRoutes);
 app.use('/api/gallery', checkSession(), galleryEditRoutes);
 
 app.use((err, req, res, next) => {
+    void next;
     console.error(err.stack);
     res.status(500).json({ error: 'Internal Server Error' });
 });

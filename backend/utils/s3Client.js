@@ -10,6 +10,7 @@ import path from 'path';
 
 const BUCKET = process.env.S3_BUCKET;
 const forcePath = process.env.S3_FORCE_PATH_STYLE === 'true';
+const IS_DEBUG_LOGS = (process.env.LOG_LEVEL || '').toLowerCase() === 'debug';
 
 const s3 = new S3Client({
     region: process.env.S3_REGION,
@@ -19,7 +20,7 @@ const s3 = new S3Client({
         accessKeyId: process.env.S3_ACCESS_KEY_ID,
         secretAccessKey: process.env.S3_SECRET_ACCESS_KEY,
     },
-    logger: console,
+    ...(IS_DEBUG_LOGS ? { logger: console } : {}),
 });
 
 export async function listObjects(prefix, maxKeys = 1000, continuationToken) {
@@ -69,29 +70,36 @@ export async function listPrefixes(prefix = '') {
     }
 }
 
-export async function getSignedUrlForKey(key, expiresInSec = 300) {
-    try {
-        await s3.send(new HeadObjectCommand({ Bucket: BUCKET, Key: key }));
-    } catch (e) {
-        console.error('HeadObject failed for', key, {
-            code: e.Code || e.name,
-            status: e.$metadata?.httpStatusCode,
-        });
-        if (
-            e.Code === 'NotFound' ||
-            e.Code === 'NoSuchKey' ||
-            e.$metadata?.httpStatusCode === 404
-        ) {
-            const err = new Error('S3: object not found');
-            err.code = 'NoSuchKey';
-            throw err;
+export async function getSignedUrlForKey(key, expiresInSec = 300, opts = {}) {
+    const { skipHead = false } = opts;
+
+    if (!skipHead) {
+        try {
+            await s3.send(new HeadObjectCommand({ Bucket: BUCKET, Key: key }));
+        } catch (e) {
+            console.error('HeadObject failed for', key, {
+                code: e.Code || e.name,
+                status: e.$metadata?.httpStatusCode,
+            });
+            if (
+                e.Code === 'NotFound' ||
+                e.Code === 'NoSuchKey' ||
+                e.$metadata?.httpStatusCode === 404
+            ) {
+                const err = new Error('S3: object not found');
+                err.code = 'NoSuchKey';
+                throw err;
+            }
+            if (
+                e.Code === 'AccessDenied' ||
+                e.$metadata?.httpStatusCode === 403
+            ) {
+                const err = new Error('S3: access denied to object');
+                err.code = 'AccessDenied';
+                throw err;
+            }
+            throw e;
         }
-        if (e.Code === 'AccessDenied' || e.$metadata?.httpStatusCode === 403) {
-            const err = new Error('S3: access denied to object');
-            err.code = 'AccessDenied';
-            throw err;
-        }
-        throw e;
     }
 
     const cmd = new GetObjectCommand({ Bucket: BUCKET, Key: key });

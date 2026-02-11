@@ -42,6 +42,13 @@ export default function UploadForm() {
     return pathname === '/edit' || pathname === '/edit/';
   };
 
+  const targetPathFromUrl = location.pathname
+    .replace(/^\/edit\//, '')
+    .replace(/\/+$/, '');
+  const targetPathParts = targetPathFromUrl.split('/').filter(Boolean);
+  const targetYear = targetPathParts[0] || '';
+  const targetCategory = targetPathParts.slice(1).join('/');
+
   const slugify = (str) => {
     return encodeURIComponent(
       String(str)
@@ -80,7 +87,7 @@ export default function UploadForm() {
 
       path = `${year.trim()}/${slugify(title)}`;
     } else {
-      path = location.pathname.replace(/^\/edit\//, '').replace(/\/+$/, '');
+      path = targetPathFromUrl;
     }
 
     const formData = new FormData();
@@ -122,6 +129,15 @@ export default function UploadForm() {
 
   return (
     <div className={styles.main}>
+      {!isEditRoot(location.pathname) && (
+        <>
+          <h1>
+            {targetYear} / {targetCategory}
+          </h1>
+          <p>Загрузка в папку: {targetPathFromUrl}</p>
+        </>
+      )}
+
       {previewUrl ? (
         <div className={styles.container}>
           <img src={previewUrl} alt="preview" className={styles.img} />

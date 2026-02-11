@@ -13,6 +13,39 @@ const router = express.Router();
 const PREVIEW_ROOT = 'preview/';
 const ORIGINAL_ROOT = 'original_photo/';
 const SCREEN_DIRS = ['screen-1280', 'screen-1920', 'screen-2560'];
+const SESSION_MAX_AGE_MS = 1000 * 60 * 30;
+const CARDS_S3_CONCURRENCY = 6;
+const IS_DEBUG_LOGS = (process.env.LOG_LEVEL || '').toLowerCase() === 'debug';
+
+async function mapWithConcurrency(items, limit, mapper) {
+    if (!Array.isArray(items) || items.length === 0) {
+        return [];
+    }
+
+    const results = new Array(items.length);
+    let cursor = 0;
+
+    async function worker() {
+        while (true) {
+            const currentIndex = cursor;
+            cursor += 1;
+
+            if (currentIndex >= items.length) {
+                return;
+            }
+
+            results[currentIndex] = await mapper(
+                items[currentIndex],
+                currentIndex,
+            );
+        }
+    }
+
+    const workersCount = Math.min(limit, items.length);
+    const workers = Array.from({ length: workersCount }, () => worker());
+    await Promise.all(workers);
+    return results;
+}
 
 // GET /api/gallery/cards
 router.get('/cards', async (req, res) => {
@@ -22,55 +55,69 @@ router.get('/cards', async (req, res) => {
 
         for (const yearPrefix of years) {
             const categories = await listPrefixes(yearPrefix);
-            for (const catPrefix of categories) {
-                const year = yearPrefix
-                    .replace(PREVIEW_ROOT, '')
-                    .replace(/\/$/, '');
-                const category = catPrefix
-                    .replace(yearPrefix, '')
-                    .replace(/\/$/, '');
-                const prefix = `${year}/${category}/`;
+            const year = yearPrefix
+                .replace(PREVIEW_ROOT, '')
+                .replace(/\/$/, '');
 
-                const listResult = await listObjects(
-                    `${PREVIEW_ROOT}${prefix}`,
-                );
-                const files = listResult.Contents || [];
+            const yearCards = await mapWithConcurrency(
+                categories,
+                CARDS_S3_CONCURRENCY,
+                async (catPrefix) => {
+                    const category = catPrefix
+                        .replace(yearPrefix, '')
+                        .replace(/\/$/, '');
+                    const prefix = `${year}/${category}/`;
 
-                const imgFiles = files.filter(
-                    (f) => f.Key && /\.(jpe?g|png|webp|avif|gif)$/i.test(f.Key),
-                );
+                    const listResult = await listObjects(
+                        `${PREVIEW_ROOT}${prefix}`,
+                    );
+                    const files = listResult.Contents || [];
 
-                const imageCount = imgFiles.length;
+                    const imgFiles = files.filter(
+                        (f) =>
+                            f.Key &&
+                            /\.(jpe?g|png|webp|avif|gif)$/i.test(f.Key),
+                    );
 
-                let thumbnailUrl = null;
-                if (imgFiles.length > 0) {
-                    const sorted = imgFiles
-                        .slice()
-                        .sort((a, b) => a.Key.localeCompare(b.Key));
-                    const thumbKey = sorted[0].Key; // полный ключ, например "preview/2024/event/abc.webp"
-                    try {
-                        thumbnailUrl = await getSignedUrlForKey(
-                            thumbKey,
-                            60 * 5,
-                        );
-                    } catch (e) {
-                        console.error(
-                            'Failed to get signed URL for thumbnail',
-                            thumbKey,
-                            e,
-                        );
-                        thumbnailUrl = null;
+                    const imageCount = imgFiles.length;
+
+                    let thumbnailUrl = null;
+                    if (imgFiles.length > 0) {
+                        const sorted = imgFiles
+                            .slice()
+                            .sort((a, b) => a.Key.localeCompare(b.Key));
+                        const thumbKey = sorted[0].Key; // полный ключ, например "preview/2024/event/abc.webp"
+                        try {
+                            thumbnailUrl = await getSignedUrlForKey(
+                                thumbKey,
+                                60 * 5,
+                                { skipHead: true },
+                            );
+                        } catch (e) {
+                            console.error(
+                                'Failed to get signed URL for thumbnail',
+                                thumbKey,
+                                e,
+                            );
+                            thumbnailUrl = null;
+                        }
                     }
-                }
 
-                cards.push({
-                    year,
-                    category,
-                    prefix,
-                    thumbnailUrl,
-                    imageCount,
-                });
-            }
+                    return {
+                        year,
+                        category,
+                        prefix,
+                        thumbnailUrl,
+                        imageCount,
+                    };
+                },
+            );
+
+            cards.push(...yearCards);
+        }
+
+        if (req.session?.user) {
+            req.session.cookie.maxAge = SESSION_MAX_AGE_MS;
         }
 
         res.json({ cards });
@@ -112,14 +159,21 @@ router.get('/previews', async (req, res) => {
                 return false;
             }
             if (obj.Key === prefixNoSlash || obj.Key === prefixWithSlash) {
-                console.debug(
-                    'Skipping folder placeholder object from S3:',
-                    obj.Key,
-                );
+                if (IS_DEBUG_LOGS) {
+                    console.debug(
+                        'Skipping folder placeholder object from S3:',
+                        obj.Key,
+                    );
+                }
                 return false;
             }
             if (obj.Key.endsWith('/')) {
-                console.debug('Skipping directory-like key from S3:', obj.Key);
+                if (IS_DEBUG_LOGS) {
+                    console.debug(
+                        'Skipping directory-like key from S3:',
+                        obj.Key,
+                    );
+                }
                 return false;
             }
             return true;
@@ -138,7 +192,9 @@ router.get('/previews', async (req, res) => {
                 const isVideo = rawBase.startsWith('video_');
                 const name = isVideo ? rawBase.replace(/^video_/, '') : rawBase;
 
-                const url = await getSignedUrlForKey(obj.Key, 60 * 5);
+                const url = await getSignedUrlForKey(obj.Key, 60 * 5, {
+                    skipHead: true,
+                });
                 return {
                     key: obj.Key,
                     url,
