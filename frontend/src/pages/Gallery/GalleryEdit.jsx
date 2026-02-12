@@ -1,29 +1,83 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { CornerLeftUp, CornerRightDown } from 'lucide-react';
 import { useCsrfFetch } from '@/hooks/useCsrfFetch';
 import { useCheckSession } from '@/hooks/useCheckSession';
 import styles from './GalleryEdit.module.css';
 
-export default function UploadForm() {
+const CARDS_API = '/api/gallery/cards-admin';
+const CATEGORY_RE = /^[A-Za-z]+$/;
+const CARD_PATH_RE = /^\d{1,4}\/[A-Za-z]+$/;
+
+function isEditRoot(pathname) {
+  return pathname === '/edit' || pathname === '/edit/';
+}
+
+function normalizeCategory(value) {
+  return String(value || '')
+    .trim()
+    .replace(/[^a-zA-Z]/g, '')
+    .toLowerCase();
+}
+
+async function parseJsonResponse(res) {
+  const contentType = res.headers.get('content-type') || '';
+  const data = contentType.includes('application/json')
+    ? await res.json()
+    : null;
+  if (!res.ok) {
+    throw new Error(data?.error || `Ошибка ${res.status}`);
+  }
+  return data;
+}
+
+function toEditForm(card) {
+  return {
+    year: String(card.year ?? ''),
+    category: String(card.category ?? ''),
+    title: String(card.title ?? ''),
+    sortOrder: String(card.sortOrder ?? 0),
+    previewKey: String(card.previewKey ?? '').replace(/^preview\//, ''),
+  };
+}
+
+export default function GalleryEdit() {
   const csrfFetch = useCsrfFetch();
-  const [file, setFile] = useState(null);
-  const [previewUrl, setPreviewUrl] = useState('');
-  const [status, setStatus] = useState('');
-
-  const [year, setYear] = useState('');
-  const [title, setTitle] = useState('');
-  const [isVideo, setIsVideo] = useState(false);
-
   const location = useLocation();
+  const nav = useNavigate();
 
   const { authenticated, loading: sessionLoading } = useCheckSession();
-  const nav = useNavigate();
 
   useEffect(() => {
     if (!sessionLoading && !authenticated) {
       nav('/login');
     }
   }, [sessionLoading, authenticated, nav]);
+
+  const rootMode = isEditRoot(location.pathname);
+  const targetPathFromUrl = location.pathname
+    .replace(/^\/edit\//, '')
+    .replace(/^\/+|\/+$/g, '');
+
+  const [cards, setCards] = useState([]);
+  const [cardsLoading, setCardsLoading] = useState(true);
+  const [cardsStatus, setCardsStatus] = useState('');
+  const [busyCardId, setBusyCardId] = useState(null);
+
+  const [createForm, setCreateForm] = useState({
+    year: String(new Date().getFullYear()),
+    category: '',
+    title: '',
+    sortOrder: '',
+    previewKey: '',
+  });
+
+  const [editForms, setEditForms] = useState({});
+
+  const [file, setFile] = useState(null);
+  const [previewUrl, setPreviewUrl] = useState('');
+  const [uploadStatus, setUploadStatus] = useState('');
+  const [isVideo, setIsVideo] = useState(false);
 
   useEffect(() => {
     if (!file) {
@@ -32,173 +86,570 @@ export default function UploadForm() {
     }
     const url = URL.createObjectURL(file);
     setPreviewUrl(url);
-
-    return () => {
-      URL.revokeObjectURL(url);
-    };
+    return () => URL.revokeObjectURL(url);
   }, [file]);
 
-  const isEditRoot = (pathname) => {
-    return pathname === '/edit' || pathname === '/edit/';
+  const loadCards = useCallback(async () => {
+    setCardsLoading(true);
+    try {
+      const res = await fetch(CARDS_API, {
+        credentials: 'include',
+        headers: { Accept: 'application/json' },
+      });
+
+      if (res.status === 401) {
+        nav('/login');
+        return;
+      }
+
+      const data = await parseJsonResponse(res);
+      const list = Array.isArray(data?.cards) ? data.cards : [];
+
+      setCards(list);
+      setEditForms(
+        Object.fromEntries(list.map((card) => [card.id, toEditForm(card)])),
+      );
+    } catch (err) {
+      setCardsStatus(err.message || 'Не удалось загрузить карточки');
+    } finally {
+      setCardsLoading(false);
+    }
+  }, [nav]);
+
+  useEffect(() => {
+    loadCards();
+  }, [loadCards]);
+
+  const sortedCards = useMemo(() => {
+    return cards
+      .slice()
+      .sort((a, b) => b.sortOrder - a.sortOrder || b.id - a.id);
+  }, [cards]);
+
+  const activeCard = useMemo(() => {
+    if (!targetPathFromUrl) {
+      return null;
+    }
+    return cards.find((card) => card.path === targetPathFromUrl) || null;
+  }, [cards, targetPathFromUrl]);
+
+  const setCreateField = (field, value) => {
+    setCreateForm((prev) => ({ ...prev, [field]: value }));
   };
 
-  const targetPathFromUrl = location.pathname
-    .replace(/^\/edit\//, '')
-    .replace(/\/+$/, '');
-  const targetPathParts = targetPathFromUrl.split('/').filter(Boolean);
-  const targetYear = targetPathParts[0] || '';
-  const targetCategory = targetPathParts.slice(1).join('/');
-
-  const slugify = (str) => {
-    return encodeURIComponent(
-      String(str)
-        .trim()
-        .toLowerCase()
-        .replace(/[^a-z0-9а-яё\s-]/g, '')
-        .replace(/\s+/g, '-')
-        .replace(/-+/g, '-')
-        .replace(/^-|-$/g, ''),
-    );
+  const setEditField = (cardId, field, value) => {
+    setEditForms((prev) => ({
+      ...prev,
+      [cardId]: {
+        ...prev[cardId],
+        [field]: value,
+      },
+    }));
   };
+
+  const buildPath = (yearRaw, categoryRaw) => {
+    const year = String(yearRaw || '')
+      .trim()
+      .replace(/[^0-9]/g, '');
+    const category = normalizeCategory(categoryRaw);
+    if (!/^\d{1,4}$/.test(year)) {
+      throw new Error('Год должен быть числом, например 2026');
+    }
+    if (!category || !CATEGORY_RE.test(category)) {
+      throw new Error(
+        'Категория должна быть только на английском (только буквы)',
+      );
+    }
+    return { year, category, path: `${year}/${category}` };
+  };
+
+  const handleCreateCard = async (event) => {
+    event.preventDefault();
+
+    try {
+      const { year, path } = buildPath(createForm.year, createForm.category);
+      const title = createForm.title.trim();
+      if (!title) {
+        throw new Error('Название карточки обязательно');
+      }
+
+      const sortRaw = createForm.sortOrder.trim();
+      if (sortRaw && !/^-?\d+$/.test(sortRaw)) {
+        throw new Error('Порядок должен быть целым числом');
+      }
+
+      const payload = {
+        path,
+        year: Number(year),
+        title,
+        previewKey: createForm.previewKey.trim() || null,
+      };
+      if (sortRaw) {
+        payload.sortOrder = Number(sortRaw);
+      }
+
+      const res = await csrfFetch(CARDS_API, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+      const data = await parseJsonResponse(res);
+
+      const createdPath = data?.card?.path || path;
+      setCardsStatus(`Карточка создана: ${createdPath}`);
+      setCreateForm((prev) => ({
+        ...prev,
+        category: '',
+        title: '',
+        sortOrder: '',
+        previewKey: '',
+      }));
+
+      await loadCards();
+      nav(`/edit/${createdPath}`);
+    } catch (err) {
+      setCardsStatus(err.message || 'Не удалось создать карточку');
+    }
+  };
+
+  const buildPatchFromForm = (cardId) => {
+    const form = editForms[cardId];
+    if (!form) {
+      throw new Error('Форма карточки не найдена');
+    }
+
+    const { year, path } = buildPath(form.year, form.category);
+    const title = form.title.trim();
+    if (!title) {
+      throw new Error('Название карточки обязательно');
+    }
+
+    const sortRaw = form.sortOrder.trim();
+    if (!/^-?\d+$/.test(sortRaw)) {
+      throw new Error('Порядок должен быть целым числом');
+    }
+
+    return {
+      path,
+      year: Number(year),
+      title,
+      sortOrder: Number(sortRaw),
+      previewKey: form.previewKey.trim() || null,
+    };
+  };
+
+  const handleSaveCard = async (card) => {
+    try {
+      setBusyCardId(card.id);
+      const payload = buildPatchFromForm(card.id);
+      const oldPath = card.path;
+
+      const res = await csrfFetch(`${CARDS_API}/${card.id}`, {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      });
+      await parseJsonResponse(res);
+
+      setCardsStatus(`Карточка обновлена: ${payload.path}`);
+      await loadCards();
+
+      if (targetPathFromUrl === oldPath && oldPath !== payload.path) {
+        nav(`/edit/${payload.path}`);
+      }
+    } catch (err) {
+      setCardsStatus(err.message || 'Не удалось сохранить карточку');
+    } finally {
+      setBusyCardId(null);
+    }
+  };
+
+  const handleDeleteCard = async (card) => {
+    const confirmed = window.confirm(`Удалить карточку ${card.path}?`);
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      setBusyCardId(card.id);
+      const res = await csrfFetch(`${CARDS_API}/${card.id}`, {
+        method: 'DELETE',
+      });
+      await parseJsonResponse(res);
+      setCardsStatus(`Карточка удалена: ${card.path}`);
+
+      if (targetPathFromUrl === card.path) {
+        nav('/edit');
+      }
+      await loadCards();
+    } catch (err) {
+      setCardsStatus(err.message || 'Не удалось удалить карточку');
+    } finally {
+      setBusyCardId(null);
+    }
+  };
+
+  const handleMoveCard = async (cardId, direction) => {
+    const ordered = sortedCards;
+    const idx = ordered.findIndex((card) => card.id === cardId);
+    const targetIdx = idx + direction;
+    if (idx < 0 || targetIdx < 0 || targetIdx >= ordered.length) {
+      return;
+    }
+
+    const current = ordered[idx];
+    const swapWith = ordered[targetIdx];
+
+    try {
+      setBusyCardId(cardId);
+      const responses = await Promise.all([
+        csrfFetch(`${CARDS_API}/${current.id}`, {
+          method: 'PUT',
+          body: JSON.stringify({ sortOrder: swapWith.sortOrder }),
+        }),
+        csrfFetch(`${CARDS_API}/${swapWith.id}`, {
+          method: 'PUT',
+          body: JSON.stringify({ sortOrder: current.sortOrder }),
+        }),
+      ]);
+      await Promise.all(responses.map((res) => parseJsonResponse(res)));
+      setCardsStatus(`Порядок обновлён: ${current.path}`);
+      await loadCards();
+    } catch (err) {
+      setCardsStatus(err.message || 'Не удалось изменить порядок');
+    } finally {
+      setBusyCardId(null);
+    }
+  };
+
+  const handleCreateCardFromPath = async () => {
+    if (!CARD_PATH_RE.test(targetPathFromUrl)) {
+      setUploadStatus('Некорректный путь в URL, ожидается /edit/year/category');
+      return;
+    }
+
+    const [, category = ''] = targetPathFromUrl.split('/');
+    try {
+      const res = await csrfFetch(CARDS_API, {
+        method: 'POST',
+        body: JSON.stringify({
+          path: targetPathFromUrl,
+          title: category,
+        }),
+      });
+      await parseJsonResponse(res);
+      setUploadStatus(`Карточка создана: ${targetPathFromUrl}`);
+      await loadCards();
+    } catch (err) {
+      setUploadStatus(err.message || 'Не удалось создать карточку');
+    }
+  };
+
+  const canUpload = !rootMode && CARD_PATH_RE.test(targetPathFromUrl);
 
   const handleUpload = async () => {
+    if (!canUpload) {
+      setUploadStatus('Сначала откройте /edit/year/category');
+      return;
+    }
     if (!file) {
-      setStatus('Прикрепите файл');
+      setUploadStatus('Прикрепите файл');
       return;
     }
-
     if (!file.type.startsWith('image/')) {
-      setStatus('Можно загружать только изображения (превью)');
+      setUploadStatus('Можно загружать только изображения (превью)');
       return;
-    }
-
-    let path = '';
-
-    if (isEditRoot(location.pathname)) {
-      if (!year.trim() || !title.trim()) {
-        setStatus('Введите год и название');
-        return;
-      }
-
-      if (!/^\d{1,4}$/.test(year.trim())) {
-        setStatus('Год должен содержать только цифры (например 2026)');
-        return;
-      }
-
-      path = `${year.trim()}/${slugify(title)}`;
-    } else {
-      path = targetPathFromUrl;
     }
 
     const formData = new FormData();
     formData.append('image', file);
-    formData.append('path', path);
-
+    formData.append('path', targetPathFromUrl);
     if (isVideo) {
       formData.append('video', 'true');
     }
 
-    setStatus('Загружается...');
+    setUploadStatus('Загружается...');
 
     try {
       const res = await csrfFetch('/api/gallery/upload', {
         method: 'POST',
         body: formData,
       });
-
-      const contentType = res.headers.get('content-type') || '';
-      const data = contentType.includes('application/json')
-        ? await res.json()
-        : null;
-
-      if (!res.ok) {
-        setStatus(data?.error || `Ошибка ${res.status}`);
-        return;
-      }
-
-      setStatus('✅ Файл принят и обрабатывается');
+      await parseJsonResponse(res);
+      setUploadStatus(
+        'Файл принят. Количество фото обновится после обработки.',
+      );
       setFile(null);
-      setYear('');
-      setTitle('');
       setIsVideo(false);
-    } catch (e) {
-      console.error(e);
-      setStatus('Ошибка соединения');
+    } catch (err) {
+      setUploadStatus(err.message || 'Ошибка загрузки');
     }
   };
 
   return (
-    <div className={styles.main}>
-      {!isEditRoot(location.pathname) && (
-        <>
-          <h1>
-            {targetYear} / {targetCategory}
-          </h1>
-          <p>Загрузка в папку: {targetPathFromUrl}</p>
-        </>
-      )}
+    <div
+      className={`${styles.main} ${rootMode ? styles.mainRoot : styles.mainFolder}`}
+    >
+      {rootMode ? (
+        <section className={styles.managerSection}>
+          <div className={styles.sectionHead}>
+            <h1>Создание и редактирование карточек</h1>
+            <button type="button" onClick={loadCards}>
+              Обновить
+            </button>
+          </div>
 
-      {previewUrl ? (
-        <div className={styles.container}>
-          <img src={previewUrl} alt="preview" className={styles.img} />
-        </div>
+          <form className={styles.createForm} onSubmit={handleCreateCard}>
+            <h2>Создание новой папки</h2>
+            <div className={styles.grid}>
+              <label>
+                Год
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  onChange={(e) =>
+                    setCreateField(
+                      'year',
+                      e.target.value.replace(/[^0-9]/g, ''),
+                    )
+                  }
+                  placeholder="2026"
+                />
+              </label>
+              <label>
+                Категория (только англ. буквы)
+                <input
+                  type="text"
+                  onChange={(e) =>
+                    setCreateField(
+                      'category',
+                      normalizeCategory(e.target.value),
+                    )
+                  }
+                  placeholder="leto"
+                />
+              </label>
+              <label>
+                Название
+                <input
+                  type="text"
+                  onChange={(e) => setCreateField('title', e.target.value)}
+                  placeholder="Лето"
+                />
+              </label>
+              <label>
+                Порядок
+                <input
+                  type="number"
+                  onChange={(e) => setCreateField('sortOrder', e.target.value)}
+                  placeholder="0"
+                />
+              </label>
+            </div>
+            <button type="submit">Создать</button>
+          </form>
+
+          {cardsStatus && <p className={styles.status}>{cardsStatus}</p>}
+
+          <div className={styles.tableWrap}>
+            <table className={styles.table}>
+              <thead>
+                <tr>
+                  <th>Путь</th>
+                  <th>Название</th>
+                  <th>Порядок</th>
+                  <th>Фото</th>
+                  <th>Превью</th>
+                  <th>Действия</th>
+                </tr>
+              </thead>
+              <tbody>
+                {cardsLoading && (
+                  <tr>
+                    <td colSpan={6}>Загрузка карточек...</td>
+                  </tr>
+                )}
+
+                {!cardsLoading && sortedCards.length === 0 && (
+                  <tr>
+                    <td colSpan={6}>Карточек пока нет</td>
+                  </tr>
+                )}
+
+                {!cardsLoading &&
+                  sortedCards.map((card) => {
+                    const form = editForms[card.id] || toEditForm(card);
+                    const disabled = busyCardId === card.id;
+                    const previewSource = card.thumbnailUrl || null;
+                    return (
+                      <tr key={card.id}>
+                        <td>
+                          <div className={styles.pathFields}>
+                            <input
+                              type="text"
+                              value={form.year}
+                              onChange={(e) =>
+                                setEditField(
+                                  card.id,
+                                  'year',
+                                  e.target.value.replace(/[^0-9]/g, ''),
+                                )
+                              }
+                              placeholder="2026"
+                            />
+                            <span>/</span>
+                            <input
+                              type="text"
+                              value={form.category}
+                              onChange={(e) =>
+                                setEditField(
+                                  card.id,
+                                  'category',
+                                  normalizeCategory(e.target.value),
+                                )
+                              }
+                              placeholder="leto"
+                            />
+                          </div>
+                        </td>
+                        <td>
+                          <input
+                            type="text"
+                            value={form.title}
+                            onChange={(e) =>
+                              setEditField(card.id, 'title', e.target.value)
+                            }
+                            placeholder="Лето, да!"
+                          />
+                        </td>
+                        <td>
+                          <div className={styles.sortField}>
+                            <button
+                              type="button"
+                              onClick={() => handleMoveCard(card.id, -1)}
+                              disabled={disabled}
+                              title="Выше"
+                            >
+                              <CornerLeftUp />
+                            </button>
+                            <input
+                              type="number"
+                              value={form.sortOrder}
+                              onChange={(e) =>
+                                setEditField(
+                                  card.id,
+                                  'sortOrder',
+                                  e.target.value,
+                                )
+                              }
+                              placeholder="0"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => handleMoveCard(card.id, 1)}
+                              disabled={disabled}
+                              title="Ниже"
+                            >
+                              <CornerRightDown />
+                            </button>
+                          </div>
+                        </td>
+                        <td>{card.imageCount}</td>
+                        <td>
+                          <input
+                            type="text"
+                            value={form.previewKey}
+                            onChange={(e) =>
+                              setEditField(
+                                card.id,
+                                'previewKey',
+                                e.target.value,
+                              )
+                            }
+                            placeholder="year/category/file.webp"
+                          />
+                          {previewSource && (
+                            <img
+                              src={previewSource}
+                              alt=""
+                              className={styles.inlinePreview}
+                            />
+                          )}
+                        </td>
+                        <td>
+                          <div className={styles.actions}>
+                            <button
+                              type="button"
+                              onClick={() => nav(`/${card.path}`)}
+                            >
+                              Откыть
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleSaveCard(card)}
+                              disabled={disabled}
+                            >
+                              Сохранить
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteCard(card)}
+                              disabled={disabled}
+                            >
+                              Удалить
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+              </tbody>
+            </table>
+          </div>
+        </section>
       ) : (
-        <div className={styles.item}>Прикрепите фотографию</div>
-      )}
-
-      {isEditRoot(location.pathname) && (
-        <div className={styles.metaFields}>
-          <p>Создание новой папки:</p>
-
-          <p>
-            <label>
-              Год
-              <input
-                type="text"
-                inputMode="numeric"
-                value={year}
-                onChange={(e) => setYear(e.target.value.replace(/[^0-9]/g, ''))}
-                placeholder="2026"
-              />
-            </label>
+        <section className={styles.uploadSection}>
+          <h2>Загрузка фото в папку</h2>
+          <p className={styles.helpText}>
+            Папка: <strong>{targetPathFromUrl}</strong>
           </p>
-
-          <p>
-            <label>
-              Название папки
-              <input
-                type="text"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="С мал. буквы, на англ."
-              />
-            </label>
+          <p className={styles.helpText}>
+            Название:{' '}
+            <strong>{activeCard?.title || 'карточка не создана'}</strong>
           </p>
-        </div>
-      )}
+          {!activeCard && (
+            <button type="button" onClick={handleCreateCardFromPath}>
+              Создать карточку по URL
+            </button>
+          )}
 
-      <p>
-        <label>
+          {previewUrl ? (
+            <div className={styles.container}>
+              <img src={previewUrl} alt="preview" className={styles.img} />
+            </div>
+          ) : (
+            <div className={styles.item}>Прикрепите фотографию</div>
+          )}
+
+          <label className={styles.fileLabel}>
+            <input
+              type="checkbox"
+              checked={isVideo}
+              onChange={(e) => setIsVideo(e.target.checked)}
+            />
+            Это превью для видео
+          </label>
+
           <input
-            type="checkbox"
-            checked={isVideo}
-            onChange={(e) => setIsVideo(e.target.checked)}
-          />{' '}
-          Это превью для видео
-        </label>
-        <p>
-          <i>забронировать место для видео</i>
-        </p>
-      </p>
+            type="file"
+            accept="image/*"
+            onChange={(e) => setFile(e.target.files && e.target.files[0])}
+          />
 
-      <input
-        type="file"
-        accept="image/*"
-        onChange={(e) => setFile(e.target.files && e.target.files[0])}
-      />
-
-      <button onClick={handleUpload}>Загрузить</button>
-      <p>{status}</p>
+          <button type="button" onClick={handleUpload}>
+            Загрузить
+          </button>
+          {uploadStatus && <p className={styles.status}>{uploadStatus}</p>}
+        </section>
+      )}
     </div>
   );
 }

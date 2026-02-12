@@ -8,6 +8,16 @@ import { Images } from 'lucide-react';
 const API = '/api/gallery';
 const LS_KEY = 'gallery_cards_cache';
 
+function sortCardsDesc(list) {
+  return (Array.isArray(list) ? list : [])
+    .slice()
+    .sort(
+      (a, b) =>
+        Number(b?.sortOrder || 0) - Number(a?.sortOrder || 0) ||
+        Number(b?.id || 0) - Number(a?.id || 0),
+    );
+}
+
 export default function GalleryList() {
   const Title = import.meta.env.VITE_NAME;
   useTitle(Title);
@@ -32,12 +42,15 @@ export default function GalleryList() {
       try {
         const parsed = JSON.parse(cached);
         if (Array.isArray(parsed.cards) && mounted) {
-          setCards(parsed.cards);
+          const cachedCards = sortCardsDesc(parsed.cards);
+          setCards(cachedCards);
           setImageAllCount(
-            parsed.cards.reduce((sum, c) => sum + (c.imageCount || 0), 0),
+            cachedCards.reduce((sum, c) => sum + (c.imageCount || 0), 0),
           );
         }
-      } catch (_) {}
+      } catch (err) {
+        void err;
+      }
     }
 
     fetch(`${API}/cards`, {
@@ -54,14 +67,16 @@ export default function GalleryList() {
       })
       .then((d) => {
         if (!d || !mounted) return;
-        const fresh = d.cards || [];
+        const fresh = sortCardsDesc(d.cards || []);
         setCards(fresh);
         setImageAllCount(
           fresh.reduce((sum, c) => sum + (c.imageCount || 0), 0),
         );
         localStorage.setItem(LS_KEY, JSON.stringify({ cards: fresh }));
       })
-      .catch(() => {});
+      .catch((err) => {
+        void err;
+      });
 
     return () => {
       mounted = false;
@@ -83,33 +98,34 @@ export default function GalleryList() {
 
   return (
     <div className={styles.Galleries}>
-      <p>
-        {cards && (
-          <div>
-            <Images /> {imageAllCount}
-          </div>
-        )}
-      </p>
+      {cards && (
+        <div className={styles.stats}>
+          <Images /> {imageAllCount}
+        </div>
+      )}
       {cards === null
         ? skeletonCards
-        : cards.map((c) => (
-            <div
-              key={c.prefix}
-              onClick={() => nav(`/${c.year}/${c.category}`)}
-              className={styles.card}
-            >
-              <h1>{c.category}</h1>
-              <div>
-                {c.thumbnailUrl && (
-                  <img src={c.thumbnailUrl} alt="" className={styles.photo} />
-                )}
+        : cards.map((c) => {
+            const cardPath = c.path || `${c.year}/${c.category}`;
+            return (
+              <div
+                key={c.id || cardPath || c.prefix}
+                onClick={() => nav(`/${cardPath}`)}
+                className={styles.card}
+              >
+                <h1>{c.title || c.category}</h1>
+                <div>
+                  {c.thumbnailUrl && (
+                    <img src={c.thumbnailUrl} alt="" className={styles.photo} />
+                  )}
+                </div>
+                <h2>
+                  {c.year}{' '}
+                  <span className={styles.imageCount}>— {c.imageCount}</span>
+                </h2>
               </div>
-              <h2>
-                {c.year}{' '}
-                <span className={styles.imageCount}>— {c.imageCount}</span>
-              </h2>
-            </div>
-          ))}
+            );
+          })}
     </div>
   );
 }

@@ -83,8 +83,20 @@
   color: inherit;
 }
 
-h1 {
+.heading {
+  margin: 10px auto 4px auto;
+  width: min(100%, 1200px);
+  padding: 0 1%;
   text-transform: capitalize;
+}
+
+.headingPath {
+  color: var(--color-text-primary);
+}
+
+.headingTitle {
+  color: var(--color-text-secondary);
+  font-weight: 500;
 }
 
 .skeleton {

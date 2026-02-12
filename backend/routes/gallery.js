@@ -1,11 +1,12 @@
 import express from 'express';
-import {
-    listPrefixes,
-    listObjects,
-    getSignedUrlForKey,
-} from '../utils/s3Client.js';
+import { listObjects, getSignedUrlForKey } from '../utils/s3Client.js';
 import { parseIndexFromKey } from '../utils/filename.js';
 import { logAction } from '../utils/logger.js';
+import {
+    listCards,
+    updateCardImageCount,
+    updateCardPreviewKey,
+} from '../utils/cardsStore.js';
 import path from 'path';
 
 const router = express.Router();
@@ -47,74 +48,163 @@ async function mapWithConcurrency(items, limit, mapper) {
     return results;
 }
 
+function normalizeCardPathForS3(cardPath) {
+    return String(cardPath ?? '')
+        .trim()
+        .replace(/^\/+|\/+$/g, '')
+        .replace(/\.\./g, '');
+}
+
+function normalizePreviewKeyForS3(previewKey) {
+    const cleaned = String(previewKey ?? '')
+        .trim()
+        .replace(/^\/+/, '');
+    if (!cleaned) {
+        return null;
+    }
+    return cleaned.startsWith(PREVIEW_ROOT)
+        ? cleaned
+        : `${PREVIEW_ROOT}${cleaned}`;
+}
+
+function splitPath(cardPath) {
+    const clean = normalizeCardPathForS3(cardPath);
+    const parts = clean.split('/').filter(Boolean);
+    return {
+        year: parts[0] || '',
+        category: parts.slice(1).join('/'),
+    };
+}
+
+function isImageKey(key, prefixNoSlash, prefixWithSlash) {
+    if (!key) {
+        return false;
+    }
+    if (key === prefixNoSlash || key === prefixWithSlash) {
+        return false;
+    }
+    if (key.endsWith('/')) {
+        return false;
+    }
+    return /\.(jpe?g|png|webp|avif|gif)$/i.test(key);
+}
+
+async function loadCardStatsFromS3(cardPath) {
+    const safePath = normalizeCardPathForS3(cardPath);
+    if (!safePath) {
+        return { imageCount: 0, firstImageKey: null };
+    }
+
+    const fullPrefix = `${PREVIEW_ROOT}${safePath}/`;
+    const prefixNoSlash = fullPrefix.replace(/\/+$/, '');
+    const prefixWithSlash = `${prefixNoSlash}/`;
+
+    let continuationToken;
+    let imageCount = 0;
+    let firstImageKey = null;
+
+    do {
+        const data = await listObjects(fullPrefix, 1000, continuationToken);
+        const contents = data.Contents || [];
+
+        for (const obj of contents) {
+            const key = obj?.Key;
+            if (!isImageKey(key, prefixNoSlash, prefixWithSlash)) {
+                continue;
+            }
+            imageCount += 1;
+            if (!firstImageKey) {
+                firstImageKey = key;
+            }
+        }
+
+        continuationToken = data.IsTruncated
+            ? data.NextContinuationToken || null
+            : null;
+    } while (continuationToken);
+
+    return { imageCount, firstImageKey };
+}
+
 // GET /api/gallery/cards
 router.get('/cards', async (req, res) => {
     try {
-        const years = await listPrefixes(PREVIEW_ROOT); // ['preview/2024/','preview/2023/']
-        const cards = [];
+        const storedCards = await listCards();
 
-        for (const yearPrefix of years) {
-            const categories = await listPrefixes(yearPrefix);
-            const year = yearPrefix
-                .replace(PREVIEW_ROOT, '')
-                .replace(/\/$/, '');
+        const cards = await mapWithConcurrency(
+            storedCards,
+            CARDS_S3_CONCURRENCY,
+            async (card) => {
+                const { year: pathYear, category } = splitPath(card.path);
 
-            const yearCards = await mapWithConcurrency(
-                categories,
-                CARDS_S3_CONCURRENCY,
-                async (catPrefix) => {
-                    const category = catPrefix
-                        .replace(yearPrefix, '')
-                        .replace(/\/$/, '');
-                    const prefix = `${year}/${category}/`;
+                let imageCount = card.imageCount;
+                let firstImageKey = null;
 
-                    const listResult = await listObjects(
-                        `${PREVIEW_ROOT}${prefix}`,
-                    );
-                    const files = listResult.Contents || [];
+                try {
+                    const stats = await loadCardStatsFromS3(card.path);
+                    imageCount = stats.imageCount;
+                    firstImageKey = stats.firstImageKey;
 
-                    const imgFiles = files.filter(
-                        (f) =>
-                            f.Key &&
-                            /\.(jpe?g|png|webp|avif|gif)$/i.test(f.Key),
-                    );
-
-                    const imageCount = imgFiles.length;
-
-                    let thumbnailUrl = null;
-                    if (imgFiles.length > 0) {
-                        const sorted = imgFiles
-                            .slice()
-                            .sort((a, b) => a.Key.localeCompare(b.Key));
-                        const thumbKey = sorted[0].Key; // полный ключ, например "preview/2024/event/abc.webp"
-                        try {
-                            thumbnailUrl = await getSignedUrlForKey(
-                                thumbKey,
-                                60 * 5,
-                                { skipHead: true },
-                            );
-                        } catch (e) {
-                            console.error(
-                                'Failed to get signed URL for thumbnail',
-                                thumbKey,
-                                e,
-                            );
-                            thumbnailUrl = null;
-                        }
+                    if (imageCount !== card.imageCount) {
+                        await updateCardImageCount(card.id, imageCount);
                     }
+                } catch (statsErr) {
+                    console.error(
+                        'Failed to read card stats from S3',
+                        card.path,
+                        statsErr,
+                    );
+                }
 
-                    return {
-                        year,
-                        category,
-                        prefix,
-                        thumbnailUrl,
-                        imageCount,
-                    };
-                },
-            );
+                let previewKey = normalizePreviewKeyForS3(card.previewKey);
+                if (!previewKey && firstImageKey) {
+                    previewKey = firstImageKey;
+                    try {
+                        await updateCardPreviewKey(card.id, firstImageKey);
+                    } catch (previewErr) {
+                        console.error(
+                            'Failed to persist preview key for card',
+                            card.path,
+                            previewErr,
+                        );
+                    }
+                }
 
-            cards.push(...yearCards);
-        }
+                let thumbnailUrl = null;
+                if (previewKey) {
+                    try {
+                        thumbnailUrl = await getSignedUrlForKey(
+                            previewKey,
+                            60 * 5,
+                            { skipHead: true },
+                        );
+                    } catch (urlErr) {
+                        console.error(
+                            'Failed to sign preview key',
+                            previewKey,
+                            urlErr,
+                        );
+                    }
+                }
+
+                const resultYear = Number.isInteger(card.year)
+                    ? card.year
+                    : Number(pathYear) || 0;
+
+                return {
+                    id: card.id,
+                    path: card.path,
+                    year: resultYear,
+                    category,
+                    title: card.title,
+                    prefix: `${card.path}/`,
+                    thumbnailUrl,
+                    imageCount,
+                    sortOrder: card.sortOrder,
+                    previewKey,
+                };
+            },
+        );
 
         if (req.session?.user) {
             req.session.cookie.maxAge = SESSION_MAX_AGE_MS;

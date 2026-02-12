@@ -1,4 +1,3 @@
-import os from 'os';
 import express from 'express';
 import multer from 'multer';
 import sharp from 'sharp';
@@ -8,6 +7,17 @@ import {
     listObjects,
     getSignedUrlForKey,
 } from '../utils/s3Client.js';
+import {
+    listCards,
+    getCardByPath,
+    createCard,
+    updateCard,
+    deleteCard,
+    parseCardPath,
+    normalizePreviewKey,
+    updateCardImageCount,
+    updateCardPreviewKey,
+} from '../utils/cardsStore.js';
 import { logAction } from '../utils/logger.js';
 
 const router = express.Router();
@@ -16,7 +26,13 @@ const upload = multer({ storage: multer.memoryStorage() });
 sharp.concurrency(1);
 sharp.cache(false);
 
+const PREVIEW_ROOT = 'preview/';
+const ORIGINAL_ROOT = 'original_photo/';
+const SCREEN_DIRS = ['screen-1280', 'screen-1920', 'screen-2560'];
+const IMAGE_FILE_RE = /\.(jpe?g|png|webp|avif|gif)$/i;
 const CONCURRENT_BG_JOBS = 1;
+const CARDS_S3_CONCURRENCY = 4;
+
 if (!global._bgQueue) {
     global._bgQueue = {
         running: 0,
@@ -35,14 +51,14 @@ if (!global._bgQueue) {
             if (!job) {
                 return;
             }
-            this.running++;
+            this.running += 1;
             try {
                 const result = await job.task();
                 job.resolve(result);
             } catch (err) {
                 job.reject(err);
             } finally {
-                this.running--;
+                this.running -= 1;
                 setImmediate(() => this._next());
             }
         },
@@ -58,27 +74,395 @@ function makeNumericName(req) {
     return String(now * 1000n + req.app.locals._uploadSeq);
 }
 
+async function mapWithConcurrency(items, limit, mapper) {
+    if (!Array.isArray(items) || items.length === 0) {
+        return [];
+    }
+
+    const results = new Array(items.length);
+    let cursor = 0;
+
+    async function worker() {
+        while (true) {
+            const currentIndex = cursor;
+            cursor += 1;
+
+            if (currentIndex >= items.length) {
+                return;
+            }
+
+            results[currentIndex] = await mapper(
+                items[currentIndex],
+                currentIndex,
+            );
+        }
+    }
+
+    const workersCount = Math.min(limit, items.length);
+    const workers = Array.from({ length: workersCount }, () => worker());
+    await Promise.all(workers);
+    return results;
+}
+
+function normalizePreviewInput(rawPreviewKey) {
+    const normalized = normalizePreviewKey(rawPreviewKey);
+    if (!normalized) {
+        return null;
+    }
+    return normalized.startsWith(PREVIEW_ROOT)
+        ? normalized
+        : `${PREVIEW_ROOT}${normalized}`;
+}
+
+function toCardResponse(card, extra = {}) {
+    const parsedPath = parseCardPath(card.path);
+    return {
+        id: card.id,
+        path: card.path,
+        year: card.year,
+        category: parsedPath?.category || '',
+        title: card.title,
+        imageCount: card.imageCount,
+        sortOrder: card.sortOrder,
+        previewKey: card.previewKey,
+        thumbnailUrl: extra.thumbnailUrl || null,
+        createdAt: card.createdAt,
+        updatedAt: card.updatedAt,
+    };
+}
+
+function isValidationError(err) {
+    const message = String(err?.message || '');
+    return (
+        message.includes('Invalid') ||
+        message.includes('required') ||
+        message.includes('must')
+    );
+}
+
+async function signPreviewUrl(previewKey) {
+    const normalizedPreviewKey = normalizePreviewInput(previewKey);
+    if (!normalizedPreviewKey) {
+        return null;
+    }
+    try {
+        return await getSignedUrlForKey(normalizedPreviewKey, 60 * 5, {
+            skipHead: true,
+        });
+    } catch (err) {
+        console.error(
+            'Failed to sign card preview key',
+            normalizedPreviewKey,
+            err,
+        );
+        return null;
+    }
+}
+
+function isImageKey(key, prefixNoSlash, prefixWithSlash) {
+    if (!key) {
+        return false;
+    }
+    if (key === prefixNoSlash || key === prefixWithSlash || key.endsWith('/')) {
+        return false;
+    }
+    return IMAGE_FILE_RE.test(key);
+}
+
+async function loadCardStatsFromS3(cardPath) {
+    const parsedPath = parseCardPath(cardPath);
+    if (!parsedPath) {
+        throw new Error('Invalid path format. Use "year/category"');
+    }
+
+    const fullPrefix = `${PREVIEW_ROOT}${parsedPath.path}/`;
+    const prefixNoSlash = fullPrefix.replace(/\/+$/, '');
+    const prefixWithSlash = `${prefixNoSlash}/`;
+
+    let continuationToken = null;
+    let imageCount = 0;
+    let firstImageKey = null;
+
+    do {
+        const page = await listObjects(fullPrefix, 1000, continuationToken);
+        const contents = page.Contents || [];
+
+        for (const item of contents) {
+            const key = item?.Key;
+            if (!isImageKey(key, prefixNoSlash, prefixWithSlash)) {
+                continue;
+            }
+            imageCount += 1;
+            if (!firstImageKey) {
+                firstImageKey = key;
+            }
+        }
+
+        continuationToken = page.IsTruncated
+            ? page.NextContinuationToken || null
+            : null;
+    } while (continuationToken);
+
+    return { imageCount, firstImageKey };
+}
+
+async function ensureCardExists(rawPath) {
+    const parsedPath = parseCardPath(rawPath);
+    if (!parsedPath) {
+        throw new Error('Invalid path format. Use "year/category"');
+    }
+
+    const existing = await getCardByPath(parsedPath.path);
+    if (existing) {
+        return existing;
+    }
+
+    try {
+        return await createCard({
+            path: parsedPath.path,
+            year: parsedPath.year,
+            title: parsedPath.category,
+        });
+    } catch (err) {
+        if (err?.code === '23505') {
+            const racedCard = await getCardByPath(parsedPath.path);
+            if (racedCard) {
+                return racedCard;
+            }
+        }
+        throw err;
+    }
+}
+
+async function syncCardByPath(rawPath, preferredPreviewKey = null) {
+    const card = await ensureCardExists(rawPath);
+    let current = card;
+
+    const stats = await loadCardStatsFromS3(card.path);
+    if (stats.imageCount !== current.imageCount) {
+        const updatedCountCard = await updateCardImageCount(
+            current.id,
+            stats.imageCount,
+        );
+        if (updatedCountCard) {
+            current = updatedCountCard;
+        }
+    }
+
+    const preferred = normalizePreviewInput(preferredPreviewKey);
+    const nextPreviewKey =
+        current.previewKey || preferred || stats.firstImageKey;
+
+    if (nextPreviewKey && nextPreviewKey !== current.previewKey) {
+        const updatedPreviewCard = await updateCardPreviewKey(
+            current.id,
+            nextPreviewKey,
+        );
+        if (updatedPreviewCard) {
+            current = updatedPreviewCard;
+        } else {
+            current = { ...current, previewKey: nextPreviewKey };
+        }
+    }
+
+    return current;
+}
+
+router.get('/cards-admin', async (req, res) => {
+    try {
+        const storedCards = await listCards();
+        const cards = await mapWithConcurrency(
+            storedCards,
+            CARDS_S3_CONCURRENCY,
+            async (card) => {
+                try {
+                    const synced = await syncCardByPath(card.path);
+                    const thumbnailUrl = await signPreviewUrl(
+                        synced.previewKey,
+                    );
+                    return toCardResponse(synced, { thumbnailUrl });
+                } catch (err) {
+                    console.error('Failed to enrich card for admin list', err);
+                    const thumbnailUrl = await signPreviewUrl(card.previewKey);
+                    return toCardResponse(card, { thumbnailUrl });
+                }
+            },
+        );
+
+        res.json({ cards });
+        logAction(req, 'Get cards-admin', '#galleryEdit.js #cards-admin');
+    } catch (err) {
+        console.error('cards-admin error', err);
+        res.status(500).json({ error: 'Failed to fetch cards' });
+        logAction(
+            req,
+            'cards-admin error',
+            `${err}
+            #galleryEdit.js #cards-admin #error`,
+        );
+    }
+});
+
+router.post('/cards-admin', async (req, res) => {
+    try {
+        const body = req.body || {};
+        const pathFromBody =
+            body.path ||
+            `${String(body.year || '').trim()}/${String(body.category || '').trim()}`;
+        const parsedPath = parseCardPath(pathFromBody);
+        if (!parsedPath) {
+            return res.status(400).json({
+                error: 'Некорректный path. Используйте формат "year/category"',
+            });
+        }
+
+        const title = String(body.title ?? parsedPath.category).trim();
+        if (!title) {
+            return res
+                .status(400)
+                .json({ error: 'Название карточки обязательно' });
+        }
+
+        const previewKey = normalizePreviewInput(body.previewKey);
+        const created = await createCard({
+            path: parsedPath.path,
+            year: body.year ?? parsedPath.year,
+            title,
+            sortOrder: body.sortOrder,
+            previewKey,
+            imageCount: 0,
+        });
+
+        const synced = await syncCardByPath(created.path, previewKey);
+        const thumbnailUrl = await signPreviewUrl(synced.previewKey);
+
+        res.status(201).json({
+            card: toCardResponse(synced, { thumbnailUrl }),
+        });
+        logAction(
+            req,
+            'Created card',
+            `${synced.path}
+            #galleryEdit.js #cards-admin #create`,
+        );
+    } catch (err) {
+        if (err?.code === '23505') {
+            return res
+                .status(409)
+                .json({ error: 'Карточка с таким path уже есть' });
+        }
+        if (isValidationError(err)) {
+            return res.status(400).json({ error: err.message });
+        }
+        console.error('create card error', err);
+        res.status(500).json({ error: 'Failed to create card' });
+    }
+});
+
+router.put('/cards-admin/:id', async (req, res) => {
+    try {
+        const patch = { ...(req.body || {}) };
+
+        if (patch.path === undefined && patch.year && patch.category) {
+            patch.path = `${String(patch.year).trim()}/${String(
+                patch.category,
+            ).trim()}`;
+        }
+
+        if (patch.path !== undefined) {
+            const parsedPath = parseCardPath(patch.path);
+            if (!parsedPath) {
+                return res.status(400).json({
+                    error: 'Некорректный path. Используйте формат "year/category"',
+                });
+            }
+            patch.path = parsedPath.path;
+            if (
+                patch.year === undefined ||
+                patch.year === null ||
+                patch.year === ''
+            ) {
+                patch.year = parsedPath.year;
+            }
+        }
+
+        if (patch.previewKey !== undefined) {
+            patch.previewKey = normalizePreviewInput(patch.previewKey);
+        }
+
+        const updated = await updateCard(req.params.id, patch);
+        if (!updated) {
+            return res.status(404).json({ error: 'Card not found' });
+        }
+
+        const synced = await syncCardByPath(updated.path, patch.previewKey);
+        const thumbnailUrl = await signPreviewUrl(synced.previewKey);
+
+        res.json({ card: toCardResponse(synced, { thumbnailUrl }) });
+        logAction(
+            req,
+            'Updated card',
+            `${synced.path}
+            #galleryEdit.js #cards-admin #update`,
+        );
+    } catch (err) {
+        if (err?.code === '23505') {
+            return res
+                .status(409)
+                .json({ error: 'Карточка с таким path уже есть' });
+        }
+        if (isValidationError(err)) {
+            return res.status(400).json({ error: err.message });
+        }
+        console.error('update card error', err);
+        res.status(500).json({ error: 'Failed to update card' });
+    }
+});
+
+router.delete('/cards-admin/:id', async (req, res) => {
+    try {
+        const deleted = await deleteCard(req.params.id);
+        if (!deleted) {
+            return res.status(404).json({ error: 'Card not found' });
+        }
+        res.json({ card: toCardResponse(deleted) });
+        logAction(
+            req,
+            'Deleted card',
+            `${deleted.path}
+            #galleryEdit.js #cards-admin #delete`,
+        );
+    } catch (err) {
+        if (isValidationError(err)) {
+            return res.status(400).json({ error: err.message });
+        }
+        console.error('delete card error', err);
+        res.status(500).json({ error: 'Failed to delete card' });
+    }
+});
+
 router.post('/upload', upload.single('image'), async (req, res) => {
     try {
-        const folderPath = req.body.path;
-        if (!folderPath) {
-            logAction(
-                req,
-                'Missing path',
-                `${error}
-                #galleryEdit.js #upload #error`,
-            );
-            return res.status(400).json({ error: 'Missing path' });
+        const parsedFolderPath = parseCardPath(req.body.path);
+        if (!parsedFolderPath) {
+            logAction(req, 'Missing path', '#galleryEdit.js #upload #error');
+            return res.status(400).json({
+                error: 'Некорректный path. Используйте формат "year/category"',
+            });
         }
+
+        const folderPath = parsedFolderPath.path;
+
         if (!req.file) {
             logAction(
                 req,
                 'No file uploaded',
-                `${error}
-                #galleryEdit.js #upload #error`,
+                '#galleryEdit.js #upload #error',
             );
             return res.status(400).json({ error: 'No file uploaded' });
         }
+
+        await ensureCardExists(folderPath);
 
         const isVideo = String(req.body.video || '').toLowerCase();
         const videoFlag = isVideo === 'true';
@@ -90,7 +474,7 @@ router.post('/upload', upload.single('image'), async (req, res) => {
         }
 
         const origExt = path.extname(req.file.originalname) || '.jpg';
-        const originalKey = `original_photo/${folderPath}/${baseName}${origExt}`;
+        const originalKey = `${ORIGINAL_ROOT}${folderPath}/${baseName}${origExt}`;
         const statusKey = `processing/${folderPath}/${baseName}.json`;
 
         res.status(202).json({
@@ -106,8 +490,8 @@ router.post('/upload', upload.single('image'), async (req, res) => {
         );
         try {
             res.flushHeaders?.();
-        } catch (e) {
-            /* ignore */
+        } catch (err) {
+            void err;
         }
 
         setImmediate(() => {
@@ -131,7 +515,6 @@ router.post('/upload', upload.single('image'), async (req, res) => {
                         const webpOptions = { quality: 85, effort: 6 };
 
                         if (videoFlag) {
-                            const previewDir = 'preview';
                             const previewWidth = 400;
                             const baseBuffer = await sharp(buffer)
                                 .resize({
@@ -145,7 +528,7 @@ router.post('/upload', upload.single('image'), async (req, res) => {
                                 .webp(webpOptions)
                                 .toBuffer();
 
-                            const previewKey = `${previewDir}/${folderPath}/${baseName}.webp`;
+                            const previewKey = `${PREVIEW_ROOT}${folderPath}/${baseName}.webp`;
                             await uploadToS3(webpBuf, previewKey);
 
                             const VIDEO_DIRS = [
@@ -155,8 +538,8 @@ router.post('/upload', upload.single('image'), async (req, res) => {
                             ];
                             const placeholder = Buffer.from('');
                             const createdKeys = [previewKey];
-                            for (const d of VIDEO_DIRS) {
-                                const placeholderKey = `${d}/${folderPath}/.placeholder`;
+                            for (const dir of VIDEO_DIRS) {
+                                const placeholderKey = `${dir}/${folderPath}/.placeholder`;
                                 await uploadToS3(placeholder, placeholderKey);
                                 createdKeys.push(placeholderKey);
                             }
@@ -171,6 +554,15 @@ router.post('/upload', upload.single('image'), async (req, res) => {
                                 ),
                                 statusKey,
                             );
+
+                            try {
+                                await syncCardByPath(folderPath, previewKey);
+                            } catch (syncErr) {
+                                console.error(
+                                    'Failed to sync card after video upload',
+                                    syncErr,
+                                );
+                            }
                         } else {
                             const sizes = [
                                 { dir: 'preview', width: 400 },
@@ -191,21 +583,20 @@ router.post('/upload', upload.single('image'), async (req, res) => {
                                 .toBuffer();
 
                             const uploadedKeys = [];
-                            for (const s of sizes) {
-                                const outKey = `${s.dir}/${folderPath}/${baseName}.webp`;
-
-                                const resized =
-                                    s.width === maxWidth
+                            for (const size of sizes) {
+                                const outKey = `${size.dir}/${folderPath}/${baseName}.webp`;
+                                const resizedBuffer =
+                                    size.width === maxWidth
                                         ? baseBuffer
                                         : await sharp(baseBuffer)
                                               .resize({
-                                                  width: s.width,
+                                                  width: size.width,
                                                   withoutEnlargement: true,
                                                   fit: 'inside',
                                               })
                                               .toBuffer();
 
-                                const webpBuf = await sharp(resized)
+                                const webpBuf = await sharp(resizedBuffer)
                                     .webp(webpOptions)
                                     .toBuffer();
                                 await uploadToS3(webpBuf, outKey);
@@ -222,6 +613,20 @@ router.post('/upload', upload.single('image'), async (req, res) => {
                                 ),
                                 statusKey,
                             );
+
+                            const previewKey =
+                                uploadedKeys.find((k) =>
+                                    k.startsWith(PREVIEW_ROOT),
+                                ) || null;
+                            try {
+                                await syncCardByPath(folderPath, previewKey);
+                            } catch (syncErr) {
+                                console.error(
+                                    'Failed to sync card after image upload',
+                                    syncErr,
+                                );
+                            }
+
                             logAction(
                                 req,
                                 'Uploaded file done',
@@ -248,13 +653,10 @@ router.post('/upload', upload.single('image'), async (req, res) => {
                                 ),
                                 statusKey,
                             );
-                        } catch (e) {
-                            console.error('Failed to write error status:', e);
-                            logAction(
-                                req,
+                        } catch (statusErr) {
+                            console.error(
                                 'Failed to write error status:',
-                                `${e}
-                                #galleryEdit.js #upload #error`,
+                                statusErr,
                             );
                         }
                         throw err;
@@ -288,24 +690,25 @@ router.post('/upload', upload.single('image'), async (req, res) => {
 
 router.get('/reconcile', async (req, res) => {
     try {
-        let prefix = (req.query.prefix || req.body?.prefix || '').trim();
-        const limit = Number(req.query.limit || req.body?.limit || 0) || 0; // 0 = no limit
+        const rawPrefix = String(
+            req.query.prefix || req.body?.prefix || '',
+        ).trim();
+        const limit = Number(req.query.limit || req.body?.limit || 0) || 0;
+        const parsedPrefix = parseCardPath(rawPrefix);
 
-        if (!prefix) {
+        if (!parsedPrefix) {
             logAction(
                 req,
                 'Prefix required',
-                `${error}
-                #galleryEdit.js #reconcile #error`,
+                '#galleryEdit.js #reconcile #error',
             );
-            return res.status(400).json({ error: 'prefix required' });
+            return res.status(400).json({
+                error: 'Некорректный prefix. Используйте формат "year/category"',
+            });
         }
 
-        prefix = prefix.replace(/^\/+|\/+$/g, '').replace(/\.\./g, '');
-
-        const ORIGINAL_ROOT = 'original_photo/';
-        const PREVIEW_ROOT = 'preview/';
-        const SCREEN_DIRS = ['screen-1280', 'screen-1920', 'screen-2560'];
+        const prefix = parsedPrefix.path;
+        await ensureCardExists(prefix);
 
         const jobId = `${Date.now()}-${Math.floor(Math.random() * 100000)}`;
         const statusKey = `processing/reconcile/${prefix}/${jobId}.json`;
@@ -319,6 +722,7 @@ router.get('/reconcile', async (req, res) => {
             ),
             statusKey,
         );
+
         res.status(202).json({ status: 'accepted', statusKey });
         logAction(
             req,
@@ -332,7 +736,8 @@ router.get('/reconcile', async (req, res) => {
                 const origPrefix = `${ORIGINAL_ROOT}${prefix}/`;
                 const origList = await listObjects(origPrefix);
                 const origFiles = (origList.Contents || []).filter(
-                    (f) => f.Key && /\.(jpe?g|png|tiff?)$/i.test(f.Key),
+                    (file) =>
+                        file.Key && /\.(jpe?g|png|tiff?)$/i.test(file.Key),
                 );
 
                 if (origFiles.length === 0) {
@@ -361,20 +766,20 @@ router.get('/reconcile', async (req, res) => {
                         `${PREVIEW_ROOT}${prefix}/`,
                     );
                     (previewList.Contents || []).forEach(
-                        (o) => o.Key && existingKeys.add(o.Key),
+                        (obj) => obj.Key && existingKeys.add(obj.Key),
                     );
-                } catch (e) {
-                    console.error('Failed to list preview objects:', e);
+                } catch (err) {
+                    console.error('Failed to list preview objects:', err);
                 }
 
                 for (const dir of SCREEN_DIRS) {
                     try {
-                        const r = await listObjects(`${dir}/${prefix}/`);
-                        (r.Contents || []).forEach(
-                            (o) => o.Key && existingKeys.add(o.Key),
+                        const list = await listObjects(`${dir}/${prefix}/`);
+                        (list.Contents || []).forEach(
+                            (obj) => obj.Key && existingKeys.add(obj.Key),
                         );
-                    } catch (e) {
-                        console.error(`Failed to list ${dir} objects:`, e);
+                    } catch (err) {
+                        console.error(`Failed to list ${dir} objects:`, err);
                     }
                 }
 
@@ -403,7 +808,7 @@ router.get('/reconcile', async (req, res) => {
                         break;
                     }
 
-                    const origKey = fileObj.Key; // e.g. "original_photo/2024/event/abc123.jpg"
+                    const origKey = fileObj.Key;
                     if (!origKey) {
                         continue;
                     }
@@ -413,19 +818,18 @@ router.get('/reconcile', async (req, res) => {
                         : origKey;
                     rel = rel.replace(/^\/+/, '');
                     const ext = path.posix.extname(rel);
-                    const baseNoExt = ext ? rel.slice(0, -ext.length) : rel; // "2024/event/abc123"
+                    const baseNoExt = ext ? rel.slice(0, -ext.length) : rel;
 
                     const expected = [
                         `${PREVIEW_ROOT}${baseNoExt}.webp`,
-                        ...SCREEN_DIRS.map((d) => `${d}/${baseNoExt}.webp`),
+                        ...SCREEN_DIRS.map((dir) => `${dir}/${baseNoExt}.webp`),
                     ];
-
                     const missing = expected.filter(
-                        (k) => !existingKeys.has(k),
+                        (key) => !existingKeys.has(key),
                     );
 
                     if (missing.length === 0) {
-                        processed++;
+                        processed += 1;
                         if (processed % 5 === 0) {
                             await uploadToS3(
                                 Buffer.from(
@@ -445,9 +849,9 @@ router.get('/reconcile', async (req, res) => {
                     let origUrl;
                     try {
                         origUrl = await getSignedUrlForKey(origKey, 60);
-                    } catch (e) {
-                        errors.push({ key: origKey, error: String(e) });
-                        processed++;
+                    } catch (err) {
+                        errors.push({ key: origKey, error: String(err) });
+                        processed += 1;
                         await uploadToS3(
                             Buffer.from(
                                 JSON.stringify({
@@ -465,20 +869,20 @@ router.get('/reconcile', async (req, res) => {
 
                     let origBuffer;
                     try {
-                        const r = await fetch(origUrl);
-                        if (!r.ok) {
+                        const response = await fetch(origUrl);
+                        if (!response.ok) {
                             throw new Error(
-                                `failed to fetch original ${r.status}`,
+                                `failed to fetch original ${response.status}`,
                             );
                         }
-                        const ab = await r.arrayBuffer();
-                        origBuffer = Buffer.from(ab);
-                    } catch (e) {
+                        const arrBuffer = await response.arrayBuffer();
+                        origBuffer = Buffer.from(arrBuffer);
+                    } catch (err) {
                         errors.push({
                             key: origKey,
-                            error: 'download failed: ' + String(e),
+                            error: 'download failed: ' + String(err),
                         });
-                        processed++;
+                        processed += 1;
                         await uploadToS3(
                             Buffer.from(
                                 JSON.stringify({
@@ -500,23 +904,25 @@ router.get('/reconcile', async (req, res) => {
                         { dir: 'screen-1920', width: 1920 },
                         { dir: 'screen-2560', width: 2560 },
                     ];
-                    const maxW = Math.max(...sizes.map((s) => s.width));
+                    const maxWidth = Math.max(
+                        ...sizes.map((size) => size.width),
+                    );
 
-                    let baseBuf;
+                    let baseBuffer;
                     try {
-                        baseBuf = await sharp(origBuffer)
+                        baseBuffer = await sharp(origBuffer)
                             .resize({
-                                width: maxW,
+                                width: maxWidth,
                                 withoutEnlargement: true,
                                 fit: 'inside',
                             })
                             .toBuffer();
-                    } catch (e) {
+                    } catch (err) {
                         errors.push({
                             key: origKey,
-                            error: 'sharp resize failed: ' + String(e),
+                            error: 'sharp resize failed: ' + String(err),
                         });
-                        processed++;
+                        processed += 1;
                         await uploadToS3(
                             Buffer.from(
                                 JSON.stringify({
@@ -543,10 +949,10 @@ router.get('/reconcile', async (req, res) => {
                                 targetWidth = 2560;
                             }
 
-                            const resizedBuf =
-                                targetWidth === maxW
-                                    ? baseBuf
-                                    : await sharp(baseBuf)
+                            const resizedBuffer =
+                                targetWidth === maxWidth
+                                    ? baseBuffer
+                                    : await sharp(baseBuffer)
                                           .resize({
                                               width: targetWidth,
                                               withoutEnlargement: true,
@@ -554,22 +960,22 @@ router.get('/reconcile', async (req, res) => {
                                           })
                                           .toBuffer();
 
-                            const webpBuf = await sharp(resizedBuf)
+                            const webpBuffer = await sharp(resizedBuffer)
                                 .webp(webpOptions)
                                 .toBuffer();
 
-                            await uploadToS3(webpBuf, missKey);
+                            await uploadToS3(webpBuffer, missKey);
                             existingKeys.add(missKey);
-                            created++;
-                        } catch (e) {
+                            created += 1;
+                        } catch (err) {
                             errors.push({
                                 key: missKey,
-                                error: 'create/upload failed: ' + String(e),
+                                error: 'create/upload failed: ' + String(err),
                             });
                         }
                     }
 
-                    processed++;
+                    processed += 1;
                     await uploadToS3(
                         Buffer.from(
                             JSON.stringify({
@@ -597,6 +1003,15 @@ router.get('/reconcile', async (req, res) => {
                     ),
                     statusKey,
                 );
+
+                try {
+                    await syncCardByPath(prefix);
+                } catch (syncErr) {
+                    console.error(
+                        'Failed to sync card after reconcile',
+                        syncErr,
+                    );
+                }
             } catch (err) {
                 console.error('Reconcile job failed:', err);
                 try {
@@ -610,8 +1025,8 @@ router.get('/reconcile', async (req, res) => {
                         ),
                         statusKey,
                     );
-                } catch (e) {
-                    console.error('Failed to write error status:', e);
+                } catch (statusErr) {
+                    console.error('Failed to write error status:', statusErr);
                 }
             }
         });

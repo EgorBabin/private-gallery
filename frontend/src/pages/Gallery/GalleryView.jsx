@@ -8,6 +8,7 @@ import styles from './GalleryView.module.css';
 
 const API = '/api/gallery';
 const LS_KEY = 'gallery_items_cache';
+const CARDS_LS_KEY = 'gallery_cards_cache';
 
 export default function GalleryView() {
   const { year, category } = useParams();
@@ -20,10 +21,11 @@ export default function GalleryView() {
   const [originalUrls, setOriginalUrls] = useState([]);
   const [originalMetas, setOriginalMetas] = useState([]);
   const [gridCols, setGridCols] = useState(0);
+  const [cardTitle, setCardTitle] = useState('');
 
   const scrollRef = useRef(null);
   const gridRef = useRef(null);
-  useTitle(`${year} ${category}`);
+  useTitle(cardTitle ? `${year} ${cardTitle}` : `${year} ${category}`);
 
   const { authenticated, loading: sessionLoading } = useCheckSession();
   const nav = useNavigate();
@@ -33,6 +35,56 @@ export default function GalleryView() {
       nav('/login');
     }
   }, [sessionLoading, authenticated, nav]);
+
+  useEffect(() => {
+    let mounted = true;
+    const controller = new AbortController();
+
+    const applyCardTitle = (cards) => {
+      if (!mounted || !Array.isArray(cards)) {
+        return;
+      }
+      const matched = cards.find((card) => card?.path === prefixKey);
+      setCardTitle(matched?.title || '');
+    };
+
+    try {
+      const raw = localStorage.getItem(CARDS_LS_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        applyCardTitle(parsed?.cards || []);
+      }
+    } catch (err) {
+      void err;
+    }
+
+    (async () => {
+      try {
+        const res = await fetch(`${API}/cards`, {
+          credentials: 'include',
+          signal: controller.signal,
+        });
+        if (res.status === 401) {
+          nav('/login');
+          return;
+        }
+        if (!res.ok) {
+          return;
+        }
+        const data = await res.json();
+        applyCardTitle(data?.cards || []);
+      } catch (err) {
+        if (err.name !== 'AbortError') {
+          void err;
+        }
+      }
+    })();
+
+    return () => {
+      mounted = false;
+      controller.abort();
+    };
+  }, [nav, prefixKey]);
 
   const pickUrlFromMeta = useCallback((meta) => {
     if (!meta) return null;
@@ -120,8 +172,8 @@ export default function GalleryView() {
           setOriginalMetas(new Array(cachedItems.length));
         }
       }
-    } catch (e) {
-      // ignore parse errors
+    } catch (err) {
+      void err;
     }
 
     (async () => {
@@ -177,9 +229,11 @@ export default function GalleryView() {
           const root = rootRaw ? JSON.parse(rootRaw) : {};
           root[prefixKey] = { items: newItems, updatedAt: Date.now() };
           localStorage.setItem(LS_KEY, JSON.stringify(root));
-        } catch (e) {}
-      } catch (e) {
-        if (e.name === 'AbortError') return;
+        } catch (err) {
+          void err;
+        }
+      } catch (err) {
+        if (err.name === 'AbortError') return;
         if (!mounted) return;
         setItems([]);
         setOriginalUrls([]);
@@ -268,8 +322,8 @@ export default function GalleryView() {
             const chosen = pickUrlFromMeta(jd);
             if (chosen) fetchedUrls[i] = chosen;
             fetchedMetas[i] = jd;
-          } catch (e) {
-            // ignore
+          } catch (err) {
+            void err;
           }
         }),
       );
@@ -334,8 +388,13 @@ export default function GalleryView() {
 
   return (
     <>
-      <h1>
-        {year} / {category}
+      <h1 className={styles.heading}>
+        <span className={styles.headingPath}>
+          {year} / {category}
+        </span>
+        {cardTitle && (
+          <span className={styles.headingTitle}> | {cardTitle}</span>
+        )}
       </h1>
 
       <div className={styles.gridWrap} ref={scrollRef}>
