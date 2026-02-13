@@ -14,6 +14,9 @@ const router = express.Router();
 const PREVIEW_ROOT = 'preview/';
 const ORIGINAL_ROOT = 'original_photo/';
 const SCREEN_DIRS = ['screen-1280', 'screen-1920', 'screen-2560'];
+const CARD_PREFIX_RE = /^\d{1,4}\/[A-Za-z]+$/;
+const RELATIVE_MEDIA_KEY_RE =
+    /^\d{1,4}\/[A-Za-z]+\/(?:video_)?[A-Za-z0-9_-]+\.[A-Za-z0-9]+$/;
 const SESSION_MAX_AGE_MS = 1000 * 60 * 30;
 const CARDS_S3_CONCURRENCY = 6;
 const IS_DEBUG_LOGS = (process.env.LOG_LEVEL || '').toLowerCase() === 'debug';
@@ -232,10 +235,24 @@ router.get('/previews', async (req, res) => {
             return res.status(400).json({ error: 'prefix query required' });
         }
 
-        const limit = Math.min(parseInt(req.query.limit || '200', 10), 1000);
+        const normalizedPrefix = normalizeCardPathForS3(prefixParam).replace(
+            /\/+$/,
+            '',
+        );
+        if (!CARD_PREFIX_RE.test(normalizedPrefix)) {
+            return res.status(400).json({
+                error: 'Некорректный prefix. Используйте формат "year/category"',
+            });
+        }
+
+        const parsedLimit = Number.parseInt(req.query.limit || '200', 10);
+        const limit =
+            Number.isInteger(parsedLimit) && parsedLimit > 0
+                ? Math.min(parsedLimit, 1000)
+                : 200;
         const continuationToken = req.query.continuationToken;
 
-        const fullPrefix = PREVIEW_ROOT + prefixParam.replace(/^\/+/, '');
+        const fullPrefix = `${PREVIEW_ROOT}${normalizedPrefix}/`;
         const data = await listObjects(fullPrefix, limit, continuationToken);
         const contents = data.Contents || [];
 
@@ -333,6 +350,13 @@ router.get('/original', async (req, res) => {
             relative = key.slice(PREVIEW_ROOT.length);
         } else {
             relative = key;
+        }
+
+        relative = relative.replace(/^\/+/, '');
+        if (!RELATIVE_MEDIA_KEY_RE.test(relative)) {
+            return res.status(400).json({
+                error: 'Некорректный key. Используйте формат "year/category/file.ext"',
+            });
         }
 
         const ext = path.posix.extname(relative);

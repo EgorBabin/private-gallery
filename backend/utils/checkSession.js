@@ -13,9 +13,10 @@ import { logAction } from '../utils/logger.js';
 // });
 
 const DEFAULTS = {
-    requiredFields: ['id', 'username', 'email', 'authType'],
+    requiredFields: ['id', 'username', 'email', 'authType', 'role'],
     sessionCookieName: process.env.SESSION || 'session',
     frontendLoginPath: '/login',
+    allowedRoles: ['user', 'admin'],
     treatEmpty: (v) =>
         v === null ||
         v === undefined ||
@@ -120,6 +121,14 @@ export default function checkSession(opts = {}) {
                 const emailVal = user.email;
                 if (!emailRe.test(String(emailVal || ''))) {
                     missing.push('email(bad-format)');
+                }
+            }
+            if (!missing.includes('role')) {
+                const roleVal = String(user.role || '')
+                    .trim()
+                    .toLowerCase();
+                if (!cfg.allowedRoles.includes(roleVal)) {
+                    missing.push('role(invalid)');
                 }
             }
 

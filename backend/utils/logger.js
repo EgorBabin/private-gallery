@@ -48,6 +48,13 @@ async function sendToTelegram(message) {
     }
 }
 
+function escapeTelegramHtml(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+}
+
 export async function logAction(req, action, extra = {}) {
     const timestamp = new Date().toLocaleString('ru-RU', {
         timeZone: 'Europe/Moscow',
@@ -78,15 +85,14 @@ export async function logAction(req, action, extra = {}) {
     });
 
     const lines = [
-        `<b>${action}</b>`,
-        `<b>Email:</b> ${email}`,
-        `<b>Device:</b> ${device}`,
-        `<b>Time:</b> ${timestamp}`,
-        `<b>IP:</b> ${ip}`,
-        `<b>URL:</b> ${method}`,
-        `${process.env.FRONTEND_URL}${url}`,
-        `<b>${authType}</b>`,
-        `${extraData ? `📎 ${extraData}` : ''}`,
+        `<b>${escapeTelegramHtml(action)}</b>`,
+        `<b>Email:</b> ${escapeTelegramHtml(email)}`,
+        `<b>Device:</b> ${escapeTelegramHtml(device)}`,
+        `<b>Time:</b> ${escapeTelegramHtml(timestamp)}`,
+        `<b>IP:</b> ${escapeTelegramHtml(ip)}`,
+        `<b>URL:</b> ${escapeTelegramHtml(`${method} ${process.env.FRONTEND_URL}${url}`)}`,
+        `<b>Auth:</b> ${escapeTelegramHtml(authType)}`,
+        `${extraData ? `📎 ${escapeTelegramHtml(extraData)}` : ''}`,
     ];
 
     const tgMessage = lines.join('\n');

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import styles from './Users.module.css';
 import { useTitle } from '@/hooks/useTitle';
 import { useCsrfFetch } from '@/hooks/useCsrfFetch';
@@ -26,7 +26,7 @@ export default function UsersPage() {
   useWarnOnUnload(isDirty);
 
   // Получение списка пользователей
-  async function fetchUsers() {
+  const fetchUsers = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -39,11 +39,11 @@ export default function UsersPage() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [csrfFetch, vibrate]);
 
   useEffect(() => {
     fetchUsers();
-  }, []);
+  }, [fetchUsers]);
 
   // Обработка формы
   function handleChange(e) {

@@ -24,25 +24,54 @@ export default function Login() {
 
     const container = telegramRootRef.current;
     container.innerHTML = '';
+    let cancelled = false;
 
-    const authUrl = `${window.location.origin}/api/telegram${remember ? '?remember=1' : ''}`;
+    const initWidget = async () => {
+      const rememberValue = remember ? '1' : '0';
+      let authUrl = `${window.location.origin}/api/telegram?remember=${rememberValue}`;
 
-    const script = document.createElement('script');
-    script.src = 'https://telegram.org/js/telegram-widget.js?22';
-    script.async = true;
-    script.setAttribute(
-      'data-telegram-login',
-      import.meta.env.VITE_TG_BOT_USERNAME,
-    );
-    script.setAttribute('data-size', 'large');
-    script.setAttribute('data-auth-url', authUrl);
+      try {
+        const stateResponse = await fetch(
+          `/api/telegram/state?remember=${rememberValue}`,
+          {
+            credentials: 'include',
+            headers: { Accept: 'application/json' },
+          },
+        );
+        if (stateResponse.ok) {
+          const data = await stateResponse.json();
+          if (data?.state) {
+            authUrl += `&state=${encodeURIComponent(data.state)}`;
+          }
+        }
+      } catch (err) {
+        console.debug('Failed to initialize telegram auth state:', err);
+      }
 
-    container.appendChild(script);
+      if (cancelled) {
+        return;
+      }
+
+      const script = document.createElement('script');
+      script.src = 'https://telegram.org/js/telegram-widget.js?22';
+      script.async = true;
+      script.setAttribute(
+        'data-telegram-login',
+        import.meta.env.VITE_TG_BOT_USERNAME,
+      );
+      script.setAttribute('data-size', 'large');
+      script.setAttribute('data-auth-url', authUrl);
+
+      container.appendChild(script);
+    };
+
+    void initWidget();
 
     return () => {
+      cancelled = true;
       container.innerHTML = '';
     };
-  }, [remember, navigate]);
+  }, [remember]);
 
   const yandexHref = `/api/yandex${remember ? '?remember=1' : ''}`;
 

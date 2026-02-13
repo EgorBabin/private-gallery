@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
 
 export function useScrollFix({
@@ -10,7 +10,7 @@ export function useScrollFix({
   const location = useLocation();
   const cleanupRef = useRef(null);
 
-  function findByHash(hash) {
+  const findByHash = useCallback((hash) => {
     if (!hash) return null;
     const id = decodeURIComponent(hash.slice(1));
     let el = null;
@@ -20,79 +20,87 @@ export function useScrollFix({
       } else {
         el = document.getElementById(id);
       }
-    } catch (e) {
+    } catch {
       el = document.getElementById(id);
     }
     if (!el) {
       el = document.querySelector(`[name="${id}"]`);
     }
     return el;
-  }
+  }, []);
 
-  function scrollToTarget(target) {
-    if (typeof target === 'number') {
-      window.scrollTo({ top: target, behavior });
-    } else if (target instanceof Element) {
-      target.scrollIntoView({ behavior, block: 'start', inline: 'nearest' });
-    } else {
-      window.scrollTo({ top: 0, behavior });
-    }
-  }
-
-  function scrollToHashWithRetries(hash) {
-    if (!hash) return null;
-    let attempts = 0;
-    let intervalId = null;
-    let observer = null;
-    let finished = false;
-
-    const cleanup = () => {
-      if (intervalId) {
-        clearInterval(intervalId);
-        intervalId = null;
+  const scrollToTarget = useCallback(
+    (target) => {
+      if (typeof target === 'number') {
+        window.scrollTo({ top: target, behavior });
+      } else if (target instanceof Element) {
+        target.scrollIntoView({ behavior, block: 'start', inline: 'nearest' });
+      } else {
+        window.scrollTo({ top: 0, behavior });
       }
-      if (observer) {
-        observer.disconnect();
-        observer = null;
-      }
-      finished = true;
-    };
+    },
+    [behavior],
+  );
 
-    const tryOnce = () => {
-      if (finished) return true;
-      attempts += 1;
-      const el = findByHash(hash);
-      if (el) {
-        cleanup();
-        scrollToTarget(el);
-        return true;
-      }
-      if (attempts >= maxRetries) {
-        cleanup();
+  const scrollToHashWithRetries = useCallback(
+    (hash) => {
+      if (!hash) return null;
+      let attempts = 0;
+      let intervalId = null;
+      let observer = null;
+      let finished = false;
+
+      const cleanup = () => {
+        if (intervalId) {
+          clearInterval(intervalId);
+          intervalId = null;
+        }
+        if (observer) {
+          observer.disconnect();
+          observer = null;
+        }
+        finished = true;
+      };
+
+      const tryOnce = () => {
+        if (finished) return true;
+        attempts += 1;
+        const el = findByHash(hash);
+        if (el) {
+          cleanup();
+          scrollToTarget(el);
+          return true;
+        }
+        if (attempts >= maxRetries) {
+          cleanup();
+          return false;
+        }
         return false;
-      }
-      return false;
-    };
+      };
 
-    if (tryOnce()) return cleanup;
+      if (tryOnce()) return cleanup;
 
-    intervalId = setInterval(() => {
-      tryOnce();
-    }, retryInterval);
+      intervalId = setInterval(() => {
+        tryOnce();
+      }, retryInterval);
 
-    observer = new MutationObserver(() => {
-      tryOnce();
-    });
-    observer.observe(document.body, { childList: true, subtree: true });
+      observer = new MutationObserver(() => {
+        tryOnce();
+      });
+      observer.observe(document.body, { childList: true, subtree: true });
 
-    return cleanup;
-  }
+      return cleanup;
+    },
+    [findByHash, maxRetries, retryInterval, scrollToTarget],
+  );
 
   useEffect(() => {
     if (cleanupRef.current) {
       try {
         cleanupRef.current();
-      } catch (e) {}
+      } catch {
+        // Ignore cleanup failures when navigating away.
+      }
       cleanupRef.current = null;
     }
 
@@ -108,7 +116,9 @@ export function useScrollFix({
       if (cleanupRef.current) {
         try {
           cleanupRef.current();
-        } catch (e) {}
+        } catch {
+          // Ignore cleanup failures during unmount.
+        }
         cleanupRef.current = null;
       }
     };
@@ -117,8 +127,7 @@ export function useScrollFix({
     location.search,
     location.hash,
     topOnNavigation,
-    maxRetries,
-    retryInterval,
-    behavior,
+    scrollToHashWithRetries,
+    scrollToTarget,
   ]);
 }

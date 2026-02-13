@@ -22,7 +22,7 @@ if [ -n "${APP_INIT_EMAIL:-}" ]; then
 fi
 
 if [ -n "${APP_INIT_IS_ACTIVE:-}" ]; then
-  is_active_sql="'${APP_INIT_IS_ACTIVE}'::timestamptz"
+  is_active_sql="'${APP_INIT_IS_ACTIVE}'::boolean"
 else
   is_active_sql="NULL"
 fi

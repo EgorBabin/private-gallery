@@ -1,8 +1,10 @@
 import express from 'express';
+import crypto from 'crypto';
 import pool from '../db.js';
 import { logAction } from '../utils/logger.js';
 
 const router = express.Router();
+const OAUTH_STATE_MAX_AGE_MS = 10 * 60 * 1000;
 
 router.get('/', (req, res) => {
     if (req.session.user) {
@@ -11,14 +13,28 @@ router.get('/', (req, res) => {
 
     logAction(req, '👁️‍🗨️ Yandex');
     const remember = req.query.remember === '1' ? '1' : '0';
+    const state = crypto.randomBytes(24).toString('hex');
+    req.session.yandexAuthState = {
+        value: state,
+        remember,
+        createdAt: Date.now(),
+    };
+
     const redirectUri =
         'https://oauth.yandex.ru/authorize' +
         `?response_type=code` +
         `&client_id=${process.env.YANDEX_CLIENT_ID}` +
-        `&redirect_uri=${encodeURIComponent(process.env.YANDEX_REDIRECT_URI + '?remember=' + remember)}` +
-        `&scope=login:email`;
+        `&redirect_uri=${encodeURIComponent(process.env.YANDEX_REDIRECT_URI)}` +
+        `&scope=login:email` +
+        `&state=${encodeURIComponent(state)}`;
 
-    res.redirect(redirectUri);
+    req.session.save((err) => {
+        if (err) {
+            console.error('Failed to persist yandex oauth state:', err);
+            return res.status(500).json({ error: 'Session error' });
+        }
+        return res.redirect(redirectUri);
+    });
 });
 
 router.get('/callback', async (req, res) => {
@@ -26,9 +42,20 @@ router.get('/callback', async (req, res) => {
         return res.redirect(process.env.FRONTEND_URL);
     }
 
-    const { code, remember } = req.query;
-    if (!code) {
-        logAction(req, '⚠️ Нет кода авторизации в callback', 'Yandex');
+    const { code, state } = req.query;
+    const savedState = req.session?.yandexAuthState;
+    const remember = savedState?.remember === '1' ? '1' : '0';
+    req.session.yandexAuthState = null;
+
+    const isStateValid =
+        typeof state === 'string' &&
+        typeof savedState?.value === 'string' &&
+        state === savedState.value &&
+        Date.now() - Number(savedState.createdAt || 0) <=
+            OAUTH_STATE_MAX_AGE_MS;
+
+    if (!code || !isStateValid) {
+        logAction(req, '⚠️ Невалидный OAuth callback (code/state)', 'Yandex');
         return res.redirect(process.env.FRONTEND_URL);
     }
 
@@ -46,8 +73,16 @@ router.get('/callback', async (req, res) => {
             }),
         });
 
+        if (!tokenRes.ok) {
+            const tokenError = await tokenRes.text();
+            throw new Error(`Yandex token exchange failed: ${tokenError}`);
+        }
+
         const tokenData = await tokenRes.json();
         const accessToken = tokenData.access_token;
+        if (!accessToken) {
+            throw new Error('Yandex access token is missing');
+        }
 
         const infoRes = await fetch(
             'https://login.yandex.ru/info?format=json',
@@ -57,9 +92,16 @@ router.get('/callback', async (req, res) => {
                 },
             },
         );
+        if (!infoRes.ok) {
+            const infoError = await infoRes.text();
+            throw new Error(`Yandex profile fetch failed: ${infoError}`);
+        }
         const userInfo = await infoRes.json();
 
         const email = userInfo.default_email;
+        if (typeof email !== 'string' || !email.trim()) {
+            throw new Error('Yandex profile email is missing');
+        }
 
         const userQuery = `
             SELECT * FROM users
@@ -86,6 +128,7 @@ router.get('/callback', async (req, res) => {
                 username: rows[0].username,
                 email: email,
                 authType: 'yandex',
+                role: rows[0].role || 'user',
             };
             req.session.ip =
                 req.headers['x-forwarded-for']?.split(',')[0] ||

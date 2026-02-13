@@ -17,6 +17,7 @@ import usersRoutes from './routes/users.js';
 import telegramRoutes from './routes/telegram.js';
 import yandexRoutes from './routes/yandex.js';
 import authCheck from './utils/authCheck.js';
+import requireRole from './utils/requireRole.js';
 
 import checkSession from './utils/checkSession.js';
 
@@ -25,6 +26,11 @@ import galleryEditRoutes from './routes/galleryEdit.js';
 
 const app = express();
 const IS_DEBUG_LOGS = (process.env.LOG_LEVEL || '').toLowerCase() === 'debug';
+const requireAdmin = requireRole('admin');
+
+if (!process.env.SESSION_SECRET) {
+    throw new Error('SESSION_SECRET is required');
+}
 
 app.set('trust proxy', 1);
 
@@ -65,8 +71,8 @@ app.use(
 
 if (IS_DEBUG_LOGS) {
     app.use((req, res, next) => {
-        console.log('COOKIE _csrf:', req.cookies._csrf);
-        console.log('HEADER X-CSRF-Token:', req.get('X-CSRF-Token'));
+        console.log('CSRF cookie present:', Boolean(req.cookies._csrf));
+        console.log('CSRF header present:', Boolean(req.get('X-CSRF-Token')));
         next();
     });
 }
@@ -101,9 +107,9 @@ app.use('/api/telegram/', telegramRoutes);
 app.use('/api/yandex/', yandexRoutes);
 app.use('/api/check-session', authCheck);
 
-app.use('/api/users/', checkSession(), usersRoutes);
+app.use('/api/users/', checkSession(), requireAdmin, usersRoutes);
 app.use('/api/gallery', checkSession(), galleryRoutes);
-app.use('/api/gallery', checkSession(), galleryEditRoutes);
+app.use('/api/gallery', checkSession(), requireAdmin, galleryEditRoutes);
 
 app.use((err, req, res, next) => {
     void next;

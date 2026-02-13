@@ -21,7 +21,39 @@ import {
 import { logAction } from '../utils/logger.js';
 
 const router = express.Router();
-const upload = multer({ storage: multer.memoryStorage() });
+
+const DEFAULT_MAX_UPLOAD_MB = 20;
+const rawMaxUploadMb = Number(
+    process.env.MAX_UPLOAD_MB || DEFAULT_MAX_UPLOAD_MB,
+);
+const MAX_UPLOAD_BYTES =
+    Number.isFinite(rawMaxUploadMb) && rawMaxUploadMb > 0
+        ? Math.floor(rawMaxUploadMb * 1024 * 1024)
+        : DEFAULT_MAX_UPLOAD_MB * 1024 * 1024;
+const ALLOWED_UPLOAD_MIME_TYPES = new Set([
+    'image/jpeg',
+    'image/png',
+    'image/webp',
+    'image/avif',
+    'image/gif',
+    'image/tiff',
+]);
+
+const upload = multer({
+    storage: multer.memoryStorage(),
+    limits: {
+        fileSize: MAX_UPLOAD_BYTES,
+        files: 1,
+    },
+    fileFilter: (req, file, cb) => {
+        void req;
+        const mimeType = String(file?.mimetype || '').toLowerCase();
+        if (!ALLOWED_UPLOAD_MIME_TYPES.has(mimeType)) {
+            return cb(new Error('Unsupported file type'));
+        }
+        return cb(null, true);
+    },
+});
 
 sharp.concurrency(1);
 sharp.cache(false);
@@ -1036,6 +1068,28 @@ router.get('/reconcile', async (req, res) => {
             res.status(500).json({ error: 'Internal error' });
         }
     }
+});
+
+router.use((err, req, res, next) => {
+    if (
+        !(err instanceof multer.MulterError) &&
+        err?.message !== 'Unsupported file type'
+    ) {
+        return next(err);
+    }
+
+    if (err instanceof multer.MulterError) {
+        if (err.code === 'LIMIT_FILE_SIZE') {
+            return res.status(413).json({
+                error: `Файл слишком большой. Максимум ${Math.floor(MAX_UPLOAD_BYTES / (1024 * 1024))}MB`,
+            });
+        }
+        return res.status(400).json({ error: err.message || 'Upload error' });
+    }
+
+    return res.status(400).json({
+        error: 'Неподдерживаемый тип файла. Разрешены JPEG/PNG/WEBP/AVIF/GIF/TIFF',
+    });
 });
 
 export default router;
