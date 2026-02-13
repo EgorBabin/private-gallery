@@ -20,10 +20,14 @@ export default function Lightbox({
   const [metas, setMetas] = useState(() => new Array(items.length));
   const swiperRef = useRef(null);
   const overlayRef = useRef(null);
+  const preloadedSlidesRef = useRef(new Set());
+  const loadingSlidesRef = useRef(new Set());
 
   useEffect(() => setCurrent(startIndex), [startIndex]);
   useEffect(() => {
     setMetas(new Array(items.length));
+    preloadedSlidesRef.current.clear();
+    loadingSlidesRef.current.clear();
   }, [items]);
 
   const setMetaAt = (index, meta) => {
@@ -45,7 +49,7 @@ export default function Lightbox({
           setMetaAt(index, maybe);
           return maybe;
         }
-      } catch (e) {
+      } catch {
         // ignore and fallback to API
       }
     }
@@ -68,14 +72,46 @@ export default function Lightbox({
       if (!jd) return null;
       setMetaAt(index, jd);
       return jd;
-    } catch (e) {
+    } catch {
       return null;
+    }
+  };
+
+  const preloadSlide = async (index) => {
+    if (index < 0 || index >= items.length) return;
+    if (preloadedSlidesRef.current.has(index)) return;
+    if (loadingSlidesRef.current.has(index)) return;
+
+    const item = items[index];
+    if (!item || item.isVideo || !item.url) {
+      preloadedSlidesRef.current.add(index);
+      return;
+    }
+
+    loadingSlidesRef.current.add(index);
+    try {
+      await new Promise((resolve) => {
+        const img = new Image();
+        img.onload = resolve;
+        img.onerror = resolve;
+        img.src = item.url;
+        if (img.complete) resolve();
+      });
+    } finally {
+      loadingSlidesRef.current.delete(index);
+      preloadedSlidesRef.current.add(index);
     }
   };
 
   useEffect(() => {
     let stale = false;
-    const toLoad = [current - 1, current, current + 1];
+    const toLoad = [
+      current,
+      current - 1,
+      current + 1,
+      current - 2,
+      current + 2,
+    ];
     (async () => {
       for (const i of toLoad) {
         if (i < 0 || i >= items.length) continue;
@@ -91,12 +127,51 @@ export default function Lightbox({
   }, [current, items.length]);
 
   useEffect(() => {
+    let stale = false;
+    const queue = [current, current - 1, current + 1, current - 2, current + 2];
+
+    (async () => {
+      for (const i of queue) {
+        if (stale) return;
+        if (i < 0 || i >= items.length) continue;
+        await preloadSlide(i);
+      }
+    })();
+
+    return () => {
+      stale = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [current, items.length]);
+
+  useEffect(() => {
     const onKey = (e) => {
       if (e.key === 'Escape') onClose();
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, [onClose]);
+
+  useEffect(() => {
+    const { body, documentElement } = document;
+    const prevBodyOverflow = body.style.overflow;
+    const prevHtmlOverflow = documentElement.style.overflow;
+    const prevBodyPaddingRight = body.style.paddingRight;
+    const scrollbarWidth =
+      window.innerWidth - document.documentElement.clientWidth;
+
+    body.style.overflow = 'hidden';
+    documentElement.style.overflow = 'hidden';
+    if (scrollbarWidth > 0) {
+      body.style.paddingRight = `${scrollbarWidth}px`;
+    }
+
+    return () => {
+      body.style.overflow = prevBodyOverflow;
+      documentElement.style.overflow = prevHtmlOverflow;
+      body.style.paddingRight = prevBodyPaddingRight;
+    };
+  }, []);
 
   const RENDER_RADIUS = 2;
 
@@ -131,6 +206,26 @@ export default function Lightbox({
     return out;
   };
 
+  const getOriginalPhotoUrl = (meta) => {
+    if (!meta) return null;
+    const original = meta.original ?? meta.original_photo ?? meta.orig;
+    if (!original) return null;
+    return typeof original === 'string' ? original : original.url || null;
+  };
+
+  const currentMeta = metas[current];
+  const currentItem = items[current];
+  const currentIsVideo = !!(currentMeta?.isVideo || currentItem?.isVideo);
+  const currentBestVideo = currentIsVideo
+    ? gatherVideoUrls(currentMeta)[0]
+    : null;
+  const currentDownloadHref = currentIsVideo
+    ? currentBestVideo?.url || null
+    : getOriginalPhotoUrl(currentMeta);
+  const currentDownloadLabel = currentIsVideo
+    ? 'Скачать видео'
+    : 'Скачать оригинал';
+
   return (
     <div
       ref={overlayRef}
@@ -156,18 +251,29 @@ export default function Lightbox({
           centeredSlides
           slidesPerView="auto"
           spaceBetween={20}
+          breakpoints={{
+            0: { spaceBetween: 8 },
+            600: { spaceBetween: 12 },
+            1200: { spaceBetween: 20 },
+          }}
           className={styles.swiper}
         >
           {items.map((it, i) => {
-            const shouldRender = Math.abs(i - current) <= RENDER_RADIUS;
+            const distance = Math.abs(i - current);
+            const shouldRender = distance <= RENDER_RADIUS;
             const meta = metas[i];
             const srcFallback =
               (meta && (meta.preview?.url || meta.url)) || it.url;
             const srcSet = buildSrcSet(meta);
             const isVideo = !!(meta?.isVideo || it.isVideo);
+            const slideStateClass =
+              distance === 0 ? styles.slideActive : styles.slideSide;
 
             return (
-              <SwiperSlide key={it.key ?? i} className={styles.slide}>
+              <SwiperSlide
+                key={it.key ?? i}
+                className={`${styles.slide} ${slideStateClass}`}
+              >
                 {shouldRender ? (
                   <>
                     {isVideo ? (
@@ -229,36 +335,16 @@ export default function Lightbox({
                             </video>
                           );
                         })()}
-
-                        {meta && meta.videos
-                          ? (() => {
-                              const vids = gatherVideoUrls(meta);
-                              if (vids.length === 0) return null;
-                              const best = vids[0];
-                              return (
-                                <a
-                                  className={styles.download}
-                                  href={best.url}
-                                  target="_blank"
-                                  rel="noreferrer noopener"
-                                  aria-label="Скачать видео"
-                                  onClick={(e) => {}}
-                                >
-                                  <Hd />
-                                </a>
-                              );
-                            })()
-                          : null}
                       </div>
                     ) : srcSet ? (
-                      <picture>
+                      <picture className={styles.picture}>
                         <source srcSet={srcSet} sizes={sizesAttr} />
                         <img
                           src={srcFallback}
                           alt={it.key ?? `img-${i}`}
                           className={styles.image}
                           draggable={false}
-                          loading="lazy"
+                          loading="eager"
                           decoding="async"
                         />
                       </picture>
@@ -268,23 +354,10 @@ export default function Lightbox({
                         alt={it.key ?? `img-${i}`}
                         className={styles.image}
                         draggable={false}
-                        loading="lazy"
+                        loading="eager"
                         decoding="async"
                       />
                     )}
-
-                    {meta &&
-                    (meta.original?.url || typeof meta.original === 'string') &&
-                    !isVideo ? (
-                      <a
-                        className={styles.download}
-                        href={meta.original?.url || meta.original}
-                        target="_blank"
-                        rel="noreferrer noopener"
-                      >
-                        <Hd />
-                      </a>
-                    ) : null}
                   </>
                 ) : (
                   <div className={styles.placeholder} aria-hidden="true" />
@@ -297,6 +370,19 @@ export default function Lightbox({
           <div className="swiper-button-next" aria-hidden="true" />
         </Swiper>
       </div>
+
+      {currentDownloadHref ? (
+        <a
+          className={styles.download}
+          href={currentDownloadHref}
+          target="_blank"
+          rel="noreferrer noopener"
+          aria-label={currentDownloadLabel}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <Hd />
+        </a>
+      ) : null}
 
       <button onClick={onClose} className={styles.close} aria-label="Закрыть">
         <X />

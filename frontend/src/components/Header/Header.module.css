@@ -7,7 +7,7 @@
   background: linear-gradient(
     to top,
     var(--color-header-bg-gradient) 0%,
-    rgba(0, 0, 0, 0) 100%
+    var(--color-panel-bottom-glow) 100%
   );
   pointer-events: none;
   z-index: 40;
@@ -31,7 +31,7 @@
   border-radius: 0.7rem;
 
   background-color: var(--color-header-bg);
-  border: 2px solid transparent;
+  border: 2px solid var(--color-transparent);
   box-shadow: 0 10px 32px var(--color-header-bg);
 
   backdrop-filter: blur(10px);
@@ -66,4 +66,18 @@ header svg {
   right: 0;
   top: 50%;
   transform: translateY(-50%);
+}
+
+.activeLink svg {
+  color: var(--accent-1);
+  filter: drop-shadow(0 0 6px var(--color-header-active-shadow));
+}
+
+.disabledEditPath {
+  pointer-events: none;
+  cursor: default;
+}
+
+.disabledEditPath svg {
+  opacity: 0.45;
 }

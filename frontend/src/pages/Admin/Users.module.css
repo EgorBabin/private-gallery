@@ -31,7 +31,7 @@
 .tableWrap table input:focus {
   outline: none;
   border-color: var(--color-users-border-focus);
-  box-shadow: 0 0 0 2px --color-users-box-shadow-focus;
+  box-shadow: 0 0 0 2px var(--color-users-box-shadow-focus);
 }
 
 .tableWrap table select {
@@ -49,7 +49,7 @@
 .tableWrap table button {
   padding: 0.4rem 0.8rem;
   border-radius: 0.7rem;
-  background-color: var(--color-users-danger-hover);
+  background-color: var(--color-users-danger);
   color: var(--color-text-primary);
   font-size: 0.8rem;
   cursor: pointer;
@@ -57,7 +57,7 @@
 }
 
 .tableWrap table button:hover {
-  background-color: var(--color-users-danger);
+  background-color: var(--color-users-danger-hover);
 }
 
 .formWrap {
@@ -96,7 +96,7 @@
 .formWrap button {
   padding: 0.4rem 0.8rem;
   border-radius: 0.7rem;
-  background-color: var(--color-users-danger-hover);
+  background-color: var(--color-users-danger);
   color: var(--color-text-primary);
   font-size: 0.8rem;
   cursor: pointer;
@@ -104,5 +104,10 @@
 }
 
 .formWrap button:hover {
-  background-color: var(--color-users-danger);
+  background-color: var(--color-users-danger-hover);
+}
+
+.error {
+  margin-top: 0.6rem;
+  color: var(--color-text-danger);
 }

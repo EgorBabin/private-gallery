@@ -8,18 +8,33 @@ export default function Header() {
   const vibrate = useVibration();
   const location = useLocation();
   const navigate = useNavigate();
+  const PATH_ROOT = '/';
+  const isRootPath =
+    location.pathname === PATH_ROOT || location.pathname === '';
 
-  const isEditPath = location.pathname.startsWith('/edit/');
+  const isEditPath =
+    location.pathname === '/edit' || location.pathname.startsWith('/edit/');
+  const isAdminPath = location.pathname.startsWith('/admin');
   const editPath = isEditPath
-    ? location.pathname.replace('/edit/', '/')
+    ? location.pathname === '/edit'
+      ? PATH_ROOT
+      : location.pathname.replace('/edit/', '/')
     : `/edit${location.pathname}`;
+  const mainLinkClassName = isRootPath ? styles.activeLink : undefined;
+  const editLinkClassName =
+    [
+      isEditPath ? styles.activeLink : '',
+      isAdminPath ? styles.disabledEditPath : '',
+    ]
+      .filter(Boolean)
+      .join(' ') || undefined;
+  const adminLinkClassName = isAdminPath ? styles.activeLink : undefined;
 
   const [scrolled, setScrolled] = useState(() => window.scrollY > 10);
   const rafRef = useRef(null);
   const isScrollingRef = useRef(false);
   const scrollControllerRef = useRef(null);
-  const PATH_ROOT = '/';
-  const isRoot = location.pathname === PATH_ROOT;
+  const isRoot = isRootPath;
 
   useEffect(() => {
     const onScroll = () => {
@@ -115,6 +130,7 @@ export default function Header() {
           <Link
             aria-label="Главная"
             onClick={handleMainClick}
+            className={mainLinkClassName}
             title={
               isRoot
                 ? scrolled
@@ -132,11 +148,27 @@ export default function Header() {
             )}
           </Link>
 
-          <Link to={editPath} onClick={() => vibrate('click')}>
+          <Link
+            to={editPath}
+            onClick={(e) => {
+              if (isAdminPath) {
+                e.preventDefault();
+                return;
+              }
+              vibrate('click');
+            }}
+            className={editLinkClassName}
+            aria-disabled={isAdminPath}
+            tabIndex={isAdminPath ? -1 : undefined}
+          >
             <FolderCog />
           </Link>
 
-          <Link to="/admin" onClick={() => vibrate('click')}>
+          <Link
+            to="/admin"
+            onClick={() => vibrate('click')}
+            className={adminLinkClassName}
+          >
             <Users />
           </Link>
         </nav>

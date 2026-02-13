@@ -1,10 +1,4 @@
-import {
-  BrowserRouter,
-  Routes,
-  Route,
-  useLocation,
-  matchPath,
-} from 'react-router-dom';
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
 
 // pages
 import GalleryList from '@/pages/Gallery/GalleryList';
@@ -20,7 +14,6 @@ import ScrollProgressBar from '@/components/ScrollProgressBar/ScrollProgressBar'
 import Header from '@/components/Header/Header';
 // hooks
 import useHttpInterceptor from './hooks/useHttpInterceptor';
-import ColorBends from '@/components/ColorBends/ColorBends';
 import { useScrollFix } from '@/hooks/useScrollFix';
 
 function AppInner() {
@@ -28,17 +21,8 @@ function AppInner() {
 
   useScrollFix();
 
-  const location = useLocation();
-  const hideBackground = matchPath('/:year/:category', location.pathname);
-
   return (
     <>
-      {!hideBackground && (
-        <div className="color-bends-container">
-          <ColorBends />
-        </div>
-      )}
-
       <ScrollProgressBar />
       <Header />
 

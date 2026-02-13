@@ -200,7 +200,7 @@ export default function UsersPage() {
         </div>
       )}
 
-      {error && <div style={{ color: 'red' }}>{error}</div>}
+      {error && <div className={styles.error}>{error}</div>}
 
       <h2>Добавить пользователя</h2>
       <div className={styles.formWrap}>

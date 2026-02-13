@@ -1,43 +1,102 @@
-/* @import './colors' */
-
 :root {
-  /* Базовые (нейтральные) */
-  --color-text-primary: rgb(255, 255, 255); /* Текст главный */
-  --color-text-placeholder: rgba(255, 255, 255, 0.55);
-  --color-text-secondary: #bfc6d2; /* Текст второстепенный */
-  --color-text-secondary: ; /* Текст-подсказка / плейсхолдер */
-  --color-background-default: #0f1113;
-  --color-background-surface: #1f242a;
-  --color-border: rgba(255, 255, 255, 0.06);
+  /* Typography */
+  --color-text-primary: #e7edf6;
+  --color-text-secondary: #aab6c8;
+  --color-text-placeholder: rgba(231, 237, 246, 0.58);
+  --color-text-muted: #8692a5;
+  --color-text-inverse: #121926;
+  --color-text-danger: #f08a8a;
+  --color-transparent: transparent;
 
-  /* Страница */
-  --color-login-btn-telegram: rgb(95, 158, 160); /* Кнопка входа - telegram */
-  --color-login-btn-yandex: rgb(165, 54, 42); /* Кнопка входа - yandex */
-  --color-users-border: #969696;
-  --color-users-bg-field: #0f1113;
-  --color-users-border-focus: rgba(38, 132, 255, 1);
-  --color-users-box-shadow-focus: rgba(
-    38,
-    132,
-    255,
-    0.18
-  ); /* Тень при фокусе - users */
-  --color-users-danger: #660000;
-  --color-users-danger-hover: #c80000; /* Кнопка удаления наведена - users */
+  /* Backgrounds */
+  --color-background-default: #0d131c;
+  --color-background-elevated: #141c29;
+  --color-background-surface: #1a2433;
+  --color-background-surface-soft: #223046;
+  --color-background-input: #101823;
+  --color-background-overlay-strong: rgba(6, 10, 16, 0.78);
+  --color-background-overlay-soft: rgba(6, 10, 16, 0.38);
+  --color-background-overlay-hover: rgba(10, 15, 23, 0.18);
 
-  --accent-1: #267fff; /* синий фокус */
-  --accent-2: #ff6b6b; /* тёплый акцент */
-  --muted: #93a0b3;
+  /* Borders and dividers */
+  --color-border: rgba(231, 237, 246, 0.1);
+  --color-border-strong: rgba(231, 237, 246, 0.16);
+  --color-divider: rgba(170, 182, 200, 0.42);
 
-  /* Компоненты */
-  --color-header-bg: rgba(0, 0, 0, 0.2); /* Фон -  header*/
-  --color-header-bg-stick: rgb(139, 139, 139); /* Разделитель - header */
-  --color-header-bg-gradient: rgba(0, 0, 0, 0.75);
-  --color-swiper-scrollbar: rgba(139, 139, 139, 0.25);
-  --color-swiper-scrollbar-drag: rgba(255, 255, 255, 0.7);
-  --color-scroll-progress-bar-bg1: rgba(255, 107, 107, 0.5);
-  --color-scroll-progress-bar-bg2: rgba(254, 180, 123, 0.5);
-  --color-scroll-progress-bar-box-shadow: rgba(255, 107, 107, 0.2);
-  --color-: ;
-  --color-: ;
+  /* Accent */
+  --accent-1: #5f8eff;
+  --accent-1-strong: #4a78e6;
+  --accent-2: #5eb2ae;
+  --muted: var(--color-text-muted);
+
+  /* Status */
+  --color-danger: #a34a4a;
+  --color-danger-hover: #833737;
+
+  /* App background gradient (kept subtle for gallery focus) */
+  --color-app-bg-radial-1: rgba(128, 159, 236, 0.05);
+  --color-app-bg-radial-2: rgba(94, 178, 174, 0.04);
+  --color-app-bg-start: #0f1722;
+  --color-app-bg-mid: #0b121b;
+  --color-app-bg-end: #080d14;
+
+  /* Cards and skeletons */
+  --color-card-shadow: rgba(0, 0, 0, 0.28);
+  --color-card-shadow-hover: rgba(0, 0, 0, 0.48);
+  --color-text-shadow: rgba(4, 8, 14, 0.55);
+  --color-photo-fallback-1: #2b3547;
+  --color-photo-fallback-2: #3b4b63;
+  --color-photo-fallback-3: #2b3547;
+  --color-skeleton-base: #232f42;
+  --color-skeleton-surface: #2f3c53;
+  --color-skeleton-title: #5f6f87;
+  --color-skeleton-subtitle: #516178;
+  --color-skeleton-shimmer: rgba(255, 255, 255, 0.12);
+
+  /* Panels / common effects */
+  --color-panel-top-glow: rgba(255, 255, 255, 0.03);
+  --color-panel-bottom-glow: rgba(0, 0, 0, 0);
+  --color-panel-bottom-soft: rgba(0, 0, 0, 0.08);
+  --color-panel-shadow: rgba(2, 6, 12, 0.35);
+  --color-input-inset-shadow: rgba(0, 0, 0, 0.35);
+
+  /* Header */
+  --color-header-bg: rgba(12, 18, 27, 0.58);
+  --color-header-bg-stick: var(--color-divider);
+  --color-header-bg-gradient: rgba(8, 12, 19, 0.74);
+  --color-header-active-shadow: rgba(95, 142, 255, 0.42);
+
+  /* Lightbox */
+  --color-lightbox-overlay: rgba(4, 7, 12, 0.78);
+  --color-lightbox-control-bg: rgba(241, 245, 252, 0.9);
+  --color-lightbox-control-text: #101722;
+  --color-lightbox-nav-text: rgba(240, 245, 255, 0.55);
+  --color-lightbox-nav-bg-hover: rgba(9, 13, 21, 0.2);
+  --color-lightbox-placeholder-1: #344156;
+  --color-lightbox-placeholder-2: #29354a;
+
+  /* Scroll / progress */
+  --color-swiper-scrollbar: rgba(170, 182, 200, 0.24);
+  --color-swiper-scrollbar-drag: rgba(231, 237, 246, 0.76);
+  --color-scroll-progress-bar-bg1: rgba(95, 142, 255, 0.72);
+  --color-scroll-progress-bar-bg2: rgba(94, 178, 174, 0.66);
+  --color-scroll-progress-bar-box-shadow: rgba(74, 120, 230, 0.33);
+
+  /* Login buttons */
+  --color-login-btn-telegram: #3f7983;
+  --color-login-btn-yandex: #8a473f;
+  --color-button-shadow-telegram: rgba(63, 121, 131, 0.24);
+  --color-button-shadow-yandex: rgba(138, 71, 63, 0.24);
+  --color-button-border-dark: rgba(0, 0, 0, 0.18);
+
+  /* Users/Admin */
+  --color-users-border: rgba(231, 237, 246, 0.2);
+  --color-users-bg-field: var(--color-background-input);
+  --color-users-border-focus: var(--accent-1);
+  --color-users-box-shadow-focus: rgba(95, 142, 255, 0.22);
+  --color-users-danger: var(--color-danger);
+  --color-users-danger-hover: var(--color-danger-hover);
+
+  /* Upload */
+  --color-upload-dropzone-border: rgba(231, 237, 246, 0.14);
 }

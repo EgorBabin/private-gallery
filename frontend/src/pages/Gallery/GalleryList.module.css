@@ -20,8 +20,9 @@
   flex-direction: column;
   height: 215px;
   position: relative;
+  isolation: isolate;
   overflow: hidden;
-  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.25);
+  box-shadow: 0 10px 20px var(--color-card-shadow);
   padding: 20px;
   margin: 2%;
   border-radius: 10px;
@@ -32,7 +33,7 @@
 @media (any-hover: hover) {
   .card:hover {
     transform: scale(1.035);
-    box-shadow: 0 15px 30px rgba(0, 0, 0, 0.5);
+    box-shadow: 0 15px 30px var(--color-card-shadow-hover);
   }
   .card:hover .photo {
     height: 100%;
@@ -41,7 +42,7 @@
 
 @media (any-hover: none) {
   .card:active {
-    box-shadow: 0 15px 30px rgba(0, 0, 0, 0.5);
+    box-shadow: 0 15px 30px var(--color-card-shadow-hover);
   }
   .card:active .photo {
     height: 100%;
@@ -54,26 +55,30 @@
   left: 0;
   height: 110%;
   width: 100%;
-  z-index: -1;
+  z-index: 0;
   object-fit: cover;
   touch-action: none;
   transition: height 0.5s ease;
   background: linear-gradient(
-    rgb(52, 52, 52) 0%,
-    rgb(96, 96, 96) 50%,
-    rgb(52, 52, 52) 100%
+    var(--color-photo-fallback-1) 0%,
+    var(--color-photo-fallback-2) 50%,
+    var(--color-photo-fallback-3) 100%
   );
 }
 
 .card h1 {
+  position: relative;
+  z-index: 1;
   font-size: 1rem;
-  text-shadow: 0px 0px 5px rgba(0, 0, 0, 0.4);
+  text-shadow: 0 0 5px var(--color-text-shadow);
 }
 
 .card h2 {
+  position: relative;
+  z-index: 1;
   font-size: 0.8rem;
   margin-top: auto;
-  text-shadow: 0px 0px 5px rgba(0, 0, 0, 0.4);
+  text-shadow: 0 0 5px var(--color-text-shadow);
   font-weight: normal;
 }
 
@@ -93,8 +98,8 @@
 }
 
 .skeleton {
-  background: #343434;
-  color: transrgb(32, 32, 32);
+  background: var(--color-skeleton-base);
+  color: var(--color-transparent);
   position: relative;
   overflow: hidden;
 }
@@ -108,9 +113,9 @@
   height: 100%;
   width: 100%;
   background: linear-gradient(
-    rgba(255, 255, 255, 0) 0%,
-    rgba(255, 255, 255, 0.2) 50%,
-    rgba(255, 255, 255, 0) 100%
+    var(--color-transparent) 0%,
+    var(--color-skeleton-shimmer) 50%,
+    var(--color-transparent) 100%
   );
   animation: skeleton-shimmer 1.5s ease-in-out infinite;
 }
@@ -128,7 +133,7 @@
 .skeletonTitle {
   width: 60%;
   height: 18px;
-  background: #d3d3d3;
+  background: var(--color-skeleton-title);
   border-radius: 4px;
   margin: 6px 0;
 }
@@ -136,7 +141,7 @@
 .skeletonYear {
   width: 40%;
   height: 14px;
-  background: #acacac;
+  background: var(--color-skeleton-subtitle);
   border-radius: 4px;
   margin-top: auto;
 }

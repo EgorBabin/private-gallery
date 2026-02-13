@@ -22,9 +22,13 @@
   box-sizing: border-box;
   border: 1px solid var(--color-border);
   border-radius: 12px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent);
+  background: linear-gradient(
+    180deg,
+    var(--color-panel-top-glow),
+    var(--color-panel-bottom-glow)
+  );
   padding: clamp(12px, 2vw, 16px);
-  box-shadow: 0 8px 28px rgba(2, 6, 12, 0.35);
+  box-shadow: 0 8px 28px var(--color-panel-shadow);
 }
 
 .sectionHead {
@@ -75,7 +79,7 @@
   width: 100%;
   box-sizing: border-box;
   border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--color-border-strong);
   background: var(--color-users-bg-field);
   color: var(--color-text-primary);
   padding: 8px 10px;
@@ -86,8 +90,8 @@
   border: 0;
   border-radius: 8px;
   padding: 8px 12px;
-  color: #fff;
-  background: linear-gradient(180deg, var(--accent-1), #1a5fe0);
+  color: var(--color-text-primary);
+  background: linear-gradient(180deg, var(--accent-1), var(--accent-1-strong));
   cursor: pointer;
   font-weight: 600;
 }
@@ -117,7 +121,7 @@
 
 .table th,
 .table td {
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  border-top: 1px solid var(--color-border-strong);
   padding: 8px;
   vertical-align: top;
   font-size: 0.88rem;
@@ -188,8 +192,8 @@
   padding: 10px;
   background: linear-gradient(
     180deg,
-    rgba(255, 255, 255, 0.02),
-    rgba(0, 0, 0, 0.12)
+    var(--color-panel-top-glow),
+    var(--color-background-overlay-soft)
   );
 }
 
@@ -203,7 +207,7 @@
 .item {
   margin-top: 10px;
   min-height: 180px;
-  border: 2px dashed rgba(255, 255, 255, 0.08);
+  border: 2px dashed var(--color-upload-dropzone-border);
   border-radius: 10px;
   display: flex;
   align-items: center;
