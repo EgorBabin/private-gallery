@@ -13,6 +13,17 @@ const logPath = path.join(__dirname, '../logs/activity.log');
 
 const TELEGRAM_BOT_TOKEN = process.env.TG_BOT_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TG_CHAT_ID;
+const AUTH_ROUTE_RE = /^\/api\/(?:yandex|telegram)(?:\/|$)/i;
+const SENSITIVE_QUERY_KEYS = new Set([
+    'code',
+    'state',
+    'hash',
+    'auth_date',
+    'access_token',
+    'refresh_token',
+    'id_token',
+    'token',
+]);
 
 // Создаём папку, если не существует
 if (!fs.existsSync(path.dirname(logPath))) {
@@ -55,6 +66,37 @@ function escapeTelegramHtml(value) {
         .replace(/>/g, '&gt;');
 }
 
+function sanitizeOriginalUrl(rawUrl) {
+    const raw = String(rawUrl ?? '');
+    const [pathnameRaw, query = ''] = raw.split('?', 2);
+    const pathname = pathnameRaw || '/';
+
+    if (!query) {
+        return pathname;
+    }
+
+    const params = new URLSearchParams(query);
+    if (!params.size) {
+        return pathname;
+    }
+
+    const sanitizedParams = new URLSearchParams();
+    for (const [key, value] of params.entries()) {
+        const normalizedKey = String(key).toLowerCase();
+        if (SENSITIVE_QUERY_KEYS.has(normalizedKey)) {
+            sanitizedParams.append(key, '[REDACTED]');
+            continue;
+        }
+        sanitizedParams.append(key, value);
+    }
+
+    return `${pathname}?${sanitizedParams.toString()}`;
+}
+
+function shouldSendUrlToTelegram(pathname) {
+    return !AUTH_ROUTE_RE.test(String(pathname || ''));
+}
+
 export async function logAction(req, action, extra = {}) {
     const timestamp = new Date().toLocaleString('ru-RU', {
         timeZone: 'Europe/Moscow',
@@ -64,7 +106,8 @@ export async function logAction(req, action, extra = {}) {
         req.socket?.remoteAddress ||
         req.ip ||
         'unknown';
-    const url = req.originalUrl;
+    const cleanPath = String(req.originalUrl || '').split('?', 1)[0] || '/';
+    const sanitizedUrl = sanitizeOriginalUrl(req.originalUrl);
     const method = req.method;
     const device = getDeviceType(req);
 
@@ -76,7 +119,7 @@ export async function logAction(req, action, extra = {}) {
         extra && Object.keys(extra).length
             ? ` | Extra: ${JSON.stringify(extra)}`
             : '';
-    const logEntry = `[${timestamp}] IP: ${ip} | ${method} ${url} | ${device} | Email: ${email} | Auth: ${authType} | Action: ${action}${extra && Object.keys(extra).length ? ` | Extra: ${JSON.stringify(extra)}` : ''}\n`;
+    const logEntry = `[${timestamp}] IP: ${ip} | ${method} ${sanitizedUrl} | ${device} | Email: ${email} | Auth: ${authType} | Action: ${action}${extra && Object.keys(extra).length ? ` | Extra: ${JSON.stringify(extra)}` : ''}\n`;
 
     fs.appendFile(logPath, logEntry, (err) => {
         if (err) {
@@ -90,10 +133,18 @@ export async function logAction(req, action, extra = {}) {
         `<b>Device:</b> ${escapeTelegramHtml(device)}`,
         `<b>Time:</b> ${escapeTelegramHtml(timestamp)}`,
         `<b>IP:</b> ${escapeTelegramHtml(ip)}`,
-        `<b>URL:</b> ${escapeTelegramHtml(`${method} ${process.env.FRONTEND_URL}${url}`)}`,
         `<b>Auth:</b> ${escapeTelegramHtml(authType)}`,
         `${extraData ? `📎 ${escapeTelegramHtml(extraData)}` : ''}`,
     ];
+
+    if (shouldSendUrlToTelegram(cleanPath)) {
+        const frontendUrl = String(process.env.FRONTEND_URL || '');
+        lines.splice(
+            5,
+            0,
+            `<b>URL:</b> ${escapeTelegramHtml(`${method} ${frontendUrl}${sanitizedUrl}`)}`,
+        );
+    }
 
     const tgMessage = lines.join('\n');
     await sendToTelegram(tgMessage);
