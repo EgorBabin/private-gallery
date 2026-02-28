@@ -24,8 +24,10 @@ services:
       DOCKER_API_VERSION: "1.52"
     command:
       - --providers.docker=true
+      - --providers.docker.watch=true
       - --providers.docker.endpoint=unix:///var/run/docker.sock
       - --providers.docker.exposedbydefault=false
+      - --providers.docker.network=common
       - --ping=true 
       - --entrypoints.web.address=:80
       - --entrypoints.websecure.address=:443
