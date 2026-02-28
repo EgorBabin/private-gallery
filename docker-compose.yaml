@@ -1,6 +1,9 @@
 networks:
   gallery-net:
     driver: bridge
+  common:
+    name: ${TRAEFIK_COMMON_NETWORK:-common}
+    driver: bridge
 
 volumes:
   pgdata:
@@ -41,6 +44,7 @@ services:
       - traefik-letsencrypt:/letsencrypt
     networks:
       - gallery-net
+      - common
 
   postgres:
     image: postgres:18.1
