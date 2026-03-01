@@ -19,16 +19,12 @@ services:
       timeout: 5s
       retries: 3
       start_period: 30s
-    environment:
-      DOCKER_HOST: "unix:///var/run/docker.sock"
-      DOCKER_API_VERSION: "1.52"
     command:
       - --providers.docker=true
       - --providers.docker.watch=true
       - --providers.docker.endpoint=unix:///var/run/docker.sock
       - --providers.docker.exposedbydefault=false
-      - --providers.docker.network=common
-      - --ping=true 
+      - --ping=true
       - --entrypoints.web.address=:80
       - --entrypoints.websecure.address=:443
       - --entrypoints.web.http.redirections.entryPoint.to=websecure
