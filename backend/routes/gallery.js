@@ -92,13 +92,70 @@ function splitPath(cardPath) {
 async function findFirstSignedUrl(keys, expiresInSec) {
     for (const key of keys) {
         try {
-            const url = await getSignedUrlForKey(key, expiresInSec);
+            const url = await getSignedUrlForKey(key, expiresInSec, {
+                silentNotFound: true,
+            });
             return { key, url };
         } catch (err) {
             void err;
         }
     }
     return null;
+}
+
+function rankOriginalExtension(ext) {
+    const normalized = String(ext || '').toLowerCase();
+    const knownIndex = ORIGINAL_EXTENSIONS.indexOf(normalized);
+    return knownIndex === -1 ? ORIGINAL_EXTENSIONS.length + 1 : knownIndex;
+}
+
+async function resolveOriginalCandidates(baseNoExt) {
+    const fallbackCandidates = ORIGINAL_EXTENSIONS.map(
+        (candidateExt) => `${ORIGINAL_ROOT}${baseNoExt}${candidateExt}`,
+    );
+
+    const prefix = `${ORIGINAL_ROOT}${baseNoExt}.`;
+    const discoveredKeys = [];
+    let continuationToken = null;
+
+    try {
+        do {
+            const page = await listObjects(prefix, 1000, continuationToken);
+            const contents = page.Contents || [];
+            for (const item of contents) {
+                const key = item?.Key;
+                if (!key || key.endsWith('/')) {
+                    continue;
+                }
+                if (!key.startsWith(prefix)) {
+                    continue;
+                }
+                discoveredKeys.push(key);
+            }
+            continuationToken = page.IsTruncated
+                ? page.NextContinuationToken || null
+                : null;
+        } while (continuationToken);
+    } catch {
+        return fallbackCandidates;
+    }
+
+    if (discoveredKeys.length === 0) {
+        return fallbackCandidates;
+    }
+
+    discoveredKeys.sort((a, b) => {
+        const extA = path.posix.extname(a);
+        const extB = path.posix.extname(b);
+        const rankA = rankOriginalExtension(extA);
+        const rankB = rankOriginalExtension(extB);
+        if (rankA !== rankB) {
+            return rankA - rankB;
+        }
+        return a.localeCompare(b);
+    });
+
+    return discoveredKeys;
 }
 
 function isImageKey(key, prefixNoSlash, prefixWithSlash) {
@@ -387,18 +444,6 @@ router.get('/original', async (req, res) => {
         const baseNameOnly = path.posix.basename(baseNoExt); // e.g. "video_12345" or "12345"
         const isVideo = baseNameOnly.startsWith('video_');
 
-        const normalizedExt = String(ext || '').toLowerCase();
-        const orderedOriginalExts = [
-            ...new Set(
-                normalizedExt && normalizedExt !== '.webp'
-                    ? [normalizedExt, ...ORIGINAL_EXTENSIONS]
-                    : ORIGINAL_EXTENSIONS,
-            ),
-        ];
-        const originalCandidates = orderedOriginalExts.map(
-            (candidateExt) => `${ORIGINAL_ROOT}${baseNoExt}${candidateExt}`,
-        );
-
         const previewKey = `${PREVIEW_ROOT}${baseNoExt}.webp`;
         const screenKeys = SCREEN_DIRS.map((dir) => `${dir}/${baseNoExt}.webp`);
 
@@ -446,6 +491,8 @@ router.get('/original', async (req, res) => {
                 videos,
             });
         }
+
+        const originalCandidates = await resolveOriginalCandidates(baseNoExt);
 
         const [originalResult, previewUrl, ...screenUrls] = await Promise.all([
             findFirstSignedUrl(originalCandidates, 60 * 3),

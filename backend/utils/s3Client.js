@@ -79,25 +79,31 @@ export async function listPrefixes(prefix = '') {
 }
 
 export async function getSignedUrlForKey(key, expiresInSec = 300, opts = {}) {
-    const { skipHead = false } = opts;
+    const { skipHead = false, silentNotFound = false } = opts;
 
     if (!skipHead) {
         try {
             await s3.send(new HeadObjectCommand({ Bucket: BUCKET, Key: key }));
         } catch (e) {
-            console.error('HeadObject failed for', key, {
-                code: e.Code || e.name,
-                status: e.$metadata?.httpStatusCode,
-            });
             if (
                 e.Code === 'NotFound' ||
                 e.Code === 'NoSuchKey' ||
                 e.$metadata?.httpStatusCode === 404
             ) {
+                if (!silentNotFound) {
+                    console.error('HeadObject failed for', key, {
+                        code: e.Code || e.name,
+                        status: e.$metadata?.httpStatusCode,
+                    });
+                }
                 const err = new Error('S3: object not found');
                 err.code = 'NoSuchKey';
                 throw err;
             }
+            console.error('HeadObject failed for', key, {
+                code: e.Code || e.name,
+                status: e.$metadata?.httpStatusCode,
+            });
             if (
                 e.Code === 'AccessDenied' ||
                 e.$metadata?.httpStatusCode === 403
