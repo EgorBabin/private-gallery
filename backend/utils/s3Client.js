@@ -4,6 +4,7 @@ import {
     GetObjectCommand,
     PutObjectCommand,
     HeadObjectCommand,
+    DeleteObjectCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl as awsGetSignedUrl } from '@aws-sdk/s3-request-presigner';
 import path from 'path';
@@ -129,6 +130,41 @@ export async function uploadToS3(buffer, key, contentType) {
         ContentType: ct,
     });
 
+    return s3.send(cmd);
+}
+
+export async function getObjectBufferFromS3(key) {
+    const cmd = new GetObjectCommand({
+        Bucket: BUCKET,
+        Key: key,
+    });
+    const data = await s3.send(cmd);
+    if (!data?.Body) {
+        return Buffer.alloc(0);
+    }
+
+    if (typeof data.Body.transformToByteArray === 'function') {
+        const bytes = await data.Body.transformToByteArray();
+        return Buffer.from(bytes);
+    }
+
+    const chunks = [];
+    for await (const chunk of data.Body) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    }
+    return Buffer.concat(chunks);
+}
+
+export async function deleteFromS3(key) {
+    const cleanKey = String(key || '').trim();
+    if (!cleanKey) {
+        return;
+    }
+
+    const cmd = new DeleteObjectCommand({
+        Bucket: BUCKET,
+        Key: cleanKey,
+    });
     await s3.send(cmd);
 }
 

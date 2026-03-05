@@ -5,6 +5,7 @@
     "type": "module",
     "scripts": {
         "start": "node server.js",
+        "worker": "node worker.js",
         "lint": "eslint .",
         "lint.fix": "eslint . --fix",
         "format": "prettier . --check",
@@ -22,6 +23,7 @@
         "cors": "2.8.5",
         "csurf": "^1.2.2",
         "dotenv": "17.2.0",
+        "amqplib": "^0.10.9",
         "express": "5.1.0",
         "express-session": "^1.19.0",
         "express-useragent": "1.0.15",

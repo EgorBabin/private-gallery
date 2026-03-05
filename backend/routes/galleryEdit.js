@@ -9,15 +9,17 @@ import {
 } from '../utils/s3Client.js';
 import {
     listCards,
-    getCardByPath,
     createCard,
     updateCard,
     deleteCard,
     parseCardPath,
-    normalizePreviewKey,
-    updateCardImageCount,
-    updateCardPreviewKey,
 } from '../utils/cardsStore.js';
+import {
+    ensureCardExists,
+    syncCardByPath,
+    normalizePreviewInput,
+} from '../utils/galleryCardSync.js';
+import { publishPhotoJob } from '../utils/rabbitmq.js';
 import { logAction } from '../utils/logger.js';
 
 const router = express.Router();
@@ -61,41 +63,8 @@ sharp.cache(false);
 const PREVIEW_ROOT = 'preview/';
 const ORIGINAL_ROOT = 'original_photo/';
 const SCREEN_DIRS = ['screen-1280', 'screen-1920', 'screen-2560'];
-const IMAGE_FILE_RE = /\.(jpe?g|png|webp|avif|gif)$/i;
-const CONCURRENT_BG_JOBS = 1;
+const PROCESSING_SOURCE_ROOT = 'processing/source/';
 const CARDS_S3_CONCURRENCY = 4;
-
-if (!global._bgQueue) {
-    global._bgQueue = {
-        running: 0,
-        queue: [],
-        push(task) {
-            return new Promise((resolve, reject) => {
-                this.queue.push({ task, resolve, reject });
-                this._next();
-            });
-        },
-        async _next() {
-            if (this.running >= CONCURRENT_BG_JOBS) {
-                return;
-            }
-            const job = this.queue.shift();
-            if (!job) {
-                return;
-            }
-            this.running += 1;
-            try {
-                const result = await job.task();
-                job.resolve(result);
-            } catch (err) {
-                job.reject(err);
-            } finally {
-                this.running -= 1;
-                setImmediate(() => this._next());
-            }
-        },
-    };
-}
 
 function makeNumericName(req) {
     const now = BigInt(Date.now());
@@ -134,16 +103,6 @@ async function mapWithConcurrency(items, limit, mapper) {
     const workers = Array.from({ length: workersCount }, () => worker());
     await Promise.all(workers);
     return results;
-}
-
-function normalizePreviewInput(rawPreviewKey) {
-    const normalized = normalizePreviewKey(rawPreviewKey);
-    if (!normalized) {
-        return null;
-    }
-    return normalized.startsWith(PREVIEW_ROOT)
-        ? normalized
-        : `${PREVIEW_ROOT}${normalized}`;
 }
 
 function toCardResponse(card, extra = {}) {
@@ -189,115 +148,6 @@ async function signPreviewUrl(previewKey) {
         );
         return null;
     }
-}
-
-function isImageKey(key, prefixNoSlash, prefixWithSlash) {
-    if (!key) {
-        return false;
-    }
-    if (key === prefixNoSlash || key === prefixWithSlash || key.endsWith('/')) {
-        return false;
-    }
-    return IMAGE_FILE_RE.test(key);
-}
-
-async function loadCardStatsFromS3(cardPath) {
-    const parsedPath = parseCardPath(cardPath);
-    if (!parsedPath) {
-        throw new Error('Invalid path format. Use "year/category"');
-    }
-
-    const fullPrefix = `${PREVIEW_ROOT}${parsedPath.path}/`;
-    const prefixNoSlash = fullPrefix.replace(/\/+$/, '');
-    const prefixWithSlash = `${prefixNoSlash}/`;
-
-    let continuationToken = null;
-    let imageCount = 0;
-    let firstImageKey = null;
-
-    do {
-        const page = await listObjects(fullPrefix, 1000, continuationToken);
-        const contents = page.Contents || [];
-
-        for (const item of contents) {
-            const key = item?.Key;
-            if (!isImageKey(key, prefixNoSlash, prefixWithSlash)) {
-                continue;
-            }
-            imageCount += 1;
-            if (!firstImageKey) {
-                firstImageKey = key;
-            }
-        }
-
-        continuationToken = page.IsTruncated
-            ? page.NextContinuationToken || null
-            : null;
-    } while (continuationToken);
-
-    return { imageCount, firstImageKey };
-}
-
-async function ensureCardExists(rawPath) {
-    const parsedPath = parseCardPath(rawPath);
-    if (!parsedPath) {
-        throw new Error('Invalid path format. Use "year/category"');
-    }
-
-    const existing = await getCardByPath(parsedPath.path);
-    if (existing) {
-        return existing;
-    }
-
-    try {
-        return await createCard({
-            path: parsedPath.path,
-            year: parsedPath.year,
-            title: parsedPath.category,
-        });
-    } catch (err) {
-        if (err?.code === '23505') {
-            const racedCard = await getCardByPath(parsedPath.path);
-            if (racedCard) {
-                return racedCard;
-            }
-        }
-        throw err;
-    }
-}
-
-async function syncCardByPath(rawPath, preferredPreviewKey = null) {
-    const card = await ensureCardExists(rawPath);
-    let current = card;
-
-    const stats = await loadCardStatsFromS3(card.path);
-    if (stats.imageCount !== current.imageCount) {
-        const updatedCountCard = await updateCardImageCount(
-            current.id,
-            stats.imageCount,
-        );
-        if (updatedCountCard) {
-            current = updatedCountCard;
-        }
-    }
-
-    const preferred = normalizePreviewInput(preferredPreviewKey);
-    const nextPreviewKey =
-        current.previewKey || preferred || stats.firstImageKey;
-
-    if (nextPreviewKey && nextPreviewKey !== current.previewKey) {
-        const updatedPreviewCard = await updateCardPreviewKey(
-            current.id,
-            nextPreviewKey,
-        );
-        if (updatedPreviewCard) {
-            current = updatedPreviewCard;
-        } else {
-            current = { ...current, previewKey: nextPreviewKey };
-        }
-    }
-
-    return current;
 }
 
 router.get('/cards-admin', async (req, res) => {
@@ -474,6 +324,7 @@ router.delete('/cards-admin/:id', async (req, res) => {
 });
 
 router.post('/upload', upload.single('image'), async (req, res) => {
+    let statusKey = null;
     try {
         const parsedFolderPath = parseCardPath(req.body.path);
         if (!parsedFolderPath) {
@@ -507,7 +358,33 @@ router.post('/upload', upload.single('image'), async (req, res) => {
 
         const origExt = path.extname(req.file.originalname) || '.jpg';
         const originalKey = `${ORIGINAL_ROOT}${folderPath}/${baseName}${origExt}`;
-        const statusKey = `processing/${folderPath}/${baseName}.json`;
+        const sourceKey = videoFlag
+            ? `${PROCESSING_SOURCE_ROOT}${folderPath}/${baseName}${origExt}`
+            : originalKey;
+        statusKey = `processing/${folderPath}/${baseName}.json`;
+
+        await uploadToS3(buffer, sourceKey);
+
+        await uploadToS3(
+            Buffer.from(
+                JSON.stringify({
+                    status: 'queued',
+                    queuedAt: new Date().toISOString(),
+                }),
+            ),
+            statusKey,
+            'application/json',
+        );
+
+        await publishPhotoJob({
+            folderPath,
+            baseName,
+            sourceKey,
+            originalKey: videoFlag ? null : originalKey,
+            statusKey,
+            videoFlag,
+            cleanupSource: videoFlag,
+        });
 
         res.status(202).json({
             success: true,
@@ -520,194 +397,29 @@ router.post('/upload', upload.single('image'), async (req, res) => {
             `${baseName}
             #galleryEdit.js #upload`,
         );
-        try {
-            res.flushHeaders?.();
-        } catch (err) {
-            void err;
-        }
-
-        setImmediate(() => {
-            global._bgQueue
-                .push(async () => {
-                    try {
-                        if (!videoFlag) {
-                            await uploadToS3(buffer, originalKey);
-                        }
-
-                        await uploadToS3(
-                            Buffer.from(
-                                JSON.stringify({
-                                    status: 'processing',
-                                    startedAt: new Date().toISOString(),
-                                }),
-                            ),
-                            statusKey,
-                        );
-
-                        const webpOptions = { quality: 85, effort: 6 };
-
-                        if (videoFlag) {
-                            const previewWidth = 400;
-                            const baseBuffer = await sharp(buffer)
-                                .resize({
-                                    width: previewWidth,
-                                    withoutEnlargement: true,
-                                    fit: 'inside',
-                                })
-                                .toBuffer();
-
-                            const webpBuf = await sharp(baseBuffer)
-                                .webp(webpOptions)
-                                .toBuffer();
-
-                            const previewKey = `${PREVIEW_ROOT}${folderPath}/${baseName}.webp`;
-                            await uploadToS3(webpBuf, previewKey);
-
-                            const VIDEO_DIRS = [
-                                'video_1440',
-                                'video_1080',
-                                'video_720',
-                            ];
-                            const placeholder = Buffer.from('');
-                            const createdKeys = [previewKey];
-                            for (const dir of VIDEO_DIRS) {
-                                const placeholderKey = `${dir}/${folderPath}/.placeholder`;
-                                await uploadToS3(placeholder, placeholderKey);
-                                createdKeys.push(placeholderKey);
-                            }
-
-                            await uploadToS3(
-                                Buffer.from(
-                                    JSON.stringify({
-                                        status: 'done',
-                                        finishedAt: new Date().toISOString(),
-                                        keys: createdKeys,
-                                    }),
-                                ),
-                                statusKey,
-                            );
-
-                            try {
-                                await syncCardByPath(folderPath, previewKey);
-                            } catch (syncErr) {
-                                console.error(
-                                    'Failed to sync card after video upload',
-                                    syncErr,
-                                );
-                            }
-                        } else {
-                            const sizes = [
-                                { dir: 'preview', width: 400 },
-                                { dir: 'screen-1280', width: 1280 },
-                                { dir: 'screen-1920', width: 1920 },
-                                { dir: 'screen-2560', width: 2560 },
-                            ];
-
-                            const maxWidth = Math.max(
-                                ...sizes.map((s) => s.width),
-                            );
-                            const baseBuffer = await sharp(buffer)
-                                .resize({
-                                    width: maxWidth,
-                                    withoutEnlargement: true,
-                                    fit: 'inside',
-                                })
-                                .toBuffer();
-
-                            const uploadedKeys = [];
-                            for (const size of sizes) {
-                                const outKey = `${size.dir}/${folderPath}/${baseName}.webp`;
-                                const resizedBuffer =
-                                    size.width === maxWidth
-                                        ? baseBuffer
-                                        : await sharp(baseBuffer)
-                                              .resize({
-                                                  width: size.width,
-                                                  withoutEnlargement: true,
-                                                  fit: 'inside',
-                                              })
-                                              .toBuffer();
-
-                                const webpBuf = await sharp(resizedBuffer)
-                                    .webp(webpOptions)
-                                    .toBuffer();
-                                await uploadToS3(webpBuf, outKey);
-                                uploadedKeys.push(outKey);
-                            }
-
-                            await uploadToS3(
-                                Buffer.from(
-                                    JSON.stringify({
-                                        status: 'done',
-                                        finishedAt: new Date().toISOString(),
-                                        keys: uploadedKeys,
-                                    }),
-                                ),
-                                statusKey,
-                            );
-
-                            const previewKey =
-                                uploadedKeys.find((k) =>
-                                    k.startsWith(PREVIEW_ROOT),
-                                ) || null;
-                            try {
-                                await syncCardByPath(folderPath, previewKey);
-                            } catch (syncErr) {
-                                console.error(
-                                    'Failed to sync card after image upload',
-                                    syncErr,
-                                );
-                            }
-
-                            logAction(
-                                req,
-                                'Uploaded file done',
-                                `${uploadedKeys}
-                                #galleryEdit.js #upload`,
-                            );
-                        }
-                    } catch (err) {
-                        console.error('Background processing failed:', err);
-                        logAction(
-                            req,
-                            'Background processing failed',
-                            `${err}
-                            #galleryEdit.js #upload #error`,
-                        );
-                        try {
-                            await uploadToS3(
-                                Buffer.from(
-                                    JSON.stringify({
-                                        status: 'error',
-                                        error: String(err),
-                                        at: new Date().toISOString(),
-                                    }),
-                                ),
-                                statusKey,
-                            );
-                        } catch (statusErr) {
-                            console.error(
-                                'Failed to write error status:',
-                                statusErr,
-                            );
-                        }
-                        throw err;
-                    }
-                })
-                .catch((err) => {
-                    console.error('Queue push failed:', err);
-                    logAction(
-                        req,
-                        'Queue push failed',
-                        `${err}
-                        #galleryEdit.js #upload #error`,
-                    );
-                });
-        });
-
         return;
     } catch (err) {
         console.error('Upload route error:', err);
+        if (statusKey) {
+            try {
+                await uploadToS3(
+                    Buffer.from(
+                        JSON.stringify({
+                            status: 'error',
+                            error: String(err),
+                            at: new Date().toISOString(),
+                        }),
+                    ),
+                    statusKey,
+                    'application/json',
+                );
+            } catch (statusErr) {
+                console.error(
+                    'Failed to write upload error status:',
+                    statusErr,
+                );
+            }
+        }
         if (!res.headersSent) {
             res.status(500).json({ error: 'Upload failed' });
             logAction(

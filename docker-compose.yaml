@@ -63,6 +63,21 @@ services:
     networks:
       - gallery-net
 
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    restart: unless-stopped
+    environment:
+      - RABBITMQ_DEFAULT_USER=${RABBITMQ_USER:-guest}
+      - RABBITMQ_DEFAULT_PASS=${RABBITMQ_PASSWORD:-guest}
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - gallery-net
+
   backend:
     build:
       context: ./backend
@@ -74,12 +89,30 @@ services:
     restart: unless-stopped
     depends_on:
       - postgres
+      - rabbitmq
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.backend.rule=Host(`${SERVER_NAME}`) && PathPrefix(`/api`)"
       - "traefik.http.routers.backend.entrypoints=websecure"
       - "traefik.http.routers.backend.tls.certresolver=le"
       - "traefik.http.services.backend.loadbalancer.server.port=3000"
+    networks:
+      - gallery-net
+
+  photo-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      args:
+        NODE_ENV: production
+    env_file:
+      - .env
+    restart: unless-stopped
+    depends_on:
+      - backend
+      - postgres
+      - rabbitmq
+    command: ["npm", "run", "worker"]
     networks:
       - gallery-net
 
