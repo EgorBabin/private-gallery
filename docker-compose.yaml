@@ -8,6 +8,7 @@ networks:
 volumes:
   pgdata:
   traefik-letsencrypt:
+  rabbitmqdata:
 
 services:
   traefik:
@@ -75,6 +76,8 @@ services:
       timeout: 5s
       retries: 5
       start_period: 20s
+    volumes:
+      - rabbitmqdata:/var/lib/rabbitmq
     networks:
       - gallery-net
 
@@ -88,8 +91,10 @@ services:
       - .env
     restart: unless-stopped
     depends_on:
-      - postgres
-      - rabbitmq
+      postgres:
+        condition: service_started
+      rabbitmq:
+        condition: service_healthy
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.backend.rule=Host(`${SERVER_NAME}`) && PathPrefix(`/api`)"
@@ -109,9 +114,10 @@ services:
       - .env
     restart: unless-stopped
     depends_on:
-      - backend
-      - postgres
-      - rabbitmq
+      postgres:
+        condition: service_started
+      rabbitmq:
+        condition: service_healthy
     command: ["npm", "run", "worker"]
     networks:
       - gallery-net

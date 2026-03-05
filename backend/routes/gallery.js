@@ -14,6 +14,16 @@ const router = express.Router();
 const PREVIEW_ROOT = 'preview/';
 const ORIGINAL_ROOT = 'original_photo/';
 const SCREEN_DIRS = ['screen-1280', 'screen-1920', 'screen-2560'];
+const ORIGINAL_EXTENSIONS = [
+    '.jpg',
+    '.jpeg',
+    '.png',
+    '.webp',
+    '.avif',
+    '.gif',
+    '.tif',
+    '.tiff',
+];
 const CARD_PREFIX_RE = /^\d{1,4}\/[A-Za-z]+$/;
 const RELATIVE_MEDIA_KEY_RE =
     /^\d{1,4}\/[A-Za-z]+\/(?:video_)?[A-Za-z0-9_-]+\.[A-Za-z0-9]+$/;
@@ -77,6 +87,18 @@ function splitPath(cardPath) {
         year: parts[0] || '',
         category: parts.slice(1).join('/'),
     };
+}
+
+async function findFirstSignedUrl(keys, expiresInSec) {
+    for (const key of keys) {
+        try {
+            const url = await getSignedUrlForKey(key, expiresInSec);
+            return { key, url };
+        } catch (err) {
+            void err;
+        }
+    }
+    return null;
 }
 
 function isImageKey(key, prefixNoSlash, prefixWithSlash) {
@@ -365,8 +387,17 @@ router.get('/original', async (req, res) => {
         const baseNameOnly = path.posix.basename(baseNoExt); // e.g. "video_12345" or "12345"
         const isVideo = baseNameOnly.startsWith('video_');
 
-        const originalExt = ext || '.jpg';
-        const originalKey = `${ORIGINAL_ROOT}${baseNoExt}${originalExt}`;
+        const normalizedExt = String(ext || '').toLowerCase();
+        const orderedOriginalExts = [
+            ...new Set(
+                normalizedExt && normalizedExt !== '.webp'
+                    ? [normalizedExt, ...ORIGINAL_EXTENSIONS]
+                    : ORIGINAL_EXTENSIONS,
+            ),
+        ];
+        const originalCandidates = orderedOriginalExts.map(
+            (candidateExt) => `${ORIGINAL_ROOT}${baseNoExt}${candidateExt}`,
+        );
 
         const previewKey = `${PREVIEW_ROOT}${baseNoExt}.webp`;
         const screenKeys = SCREEN_DIRS.map((dir) => `${dir}/${baseNoExt}.webp`);
@@ -416,23 +447,22 @@ router.get('/original', async (req, res) => {
             });
         }
 
-        const allKeys = [originalKey, previewKey, ...screenKeys];
-
-        const urlPromises = allKeys.map((k) =>
-            getSignedUrlForKey(k, 60 * 3).catch((e) => {
-                console.error('getSignedUrlForKey failed for', k, e);
-                return null;
-            }),
-        );
-
-        const urls = await Promise.all(urlPromises);
+        const [originalResult, previewUrl, ...screenUrls] = await Promise.all([
+            findFirstSignedUrl(originalCandidates, 60 * 3),
+            getSignedUrlForKey(previewKey, 60 * 3).catch(() => null),
+            ...screenKeys.map((k) =>
+                getSignedUrlForKey(k, 60 * 3).catch(() => null),
+            ),
+        ]);
 
         res.json({
-            original: { key: originalKey, url: urls[0] },
-            preview: { key: previewKey, url: urls[1] },
-            screen1280: { key: screenKeys[0], url: urls[2] },
-            screen1920: { key: screenKeys[1], url: urls[3] },
-            screen2560: { key: screenKeys[2], url: urls[4] },
+            original: originalResult
+                ? { key: originalResult.key, url: originalResult.url }
+                : null,
+            preview: { key: previewKey, url: previewUrl },
+            screen1280: { key: screenKeys[0], url: screenUrls[0] || null },
+            screen1920: { key: screenKeys[1], url: screenUrls[1] || null },
+            screen2560: { key: screenKeys[2], url: screenUrls[2] || null },
         });
         logAction(req, 'Get original', '#gallery.js #original #photo');
     } catch (err) {

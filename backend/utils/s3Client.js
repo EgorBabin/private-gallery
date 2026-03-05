@@ -39,6 +39,13 @@ export async function listObjects(prefix, maxKeys = 1000, continuationToken) {
             status: e.$metadata?.httpStatusCode,
             prefix,
         });
+        if (e.Code === 'AccessDenied' || e.$metadata?.httpStatusCode === 403) {
+            const err = new Error(
+                `S3 AccessDenied for ListObjects on bucket "${BUCKET}" and prefix "${prefix}"`,
+            );
+            err.code = 'AccessDenied';
+            throw err;
+        }
         throw e;
     }
 }

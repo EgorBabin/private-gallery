@@ -11,88 +11,157 @@ const prefetch =
         ? rawPrefetch
         : PREFETCH_DEFAULT;
 
-async function main() {
-    const { connection, channel, queue } =
-        await createPhotoConsumerChannel(prefetch);
-    let isShuttingDown = false;
+const RETRY_DELAY_DEFAULT_MS = 3000;
+const rawRetryDelayMs = Number(
+    process.env.PHOTO_WORKER_RETRY_MS || RETRY_DELAY_DEFAULT_MS,
+);
+const retryDelayMs =
+    Number.isFinite(rawRetryDelayMs) && rawRetryDelayMs > 0
+        ? Math.floor(rawRetryDelayMs)
+        : RETRY_DELAY_DEFAULT_MS;
 
-    const gracefulShutdown = async (signal) => {
-        if (isShuttingDown) {
-            return;
-        }
-        isShuttingDown = true;
-        console.log(`[photo-worker] Received ${signal}, shutting down...`);
+let isShuttingDown = false;
+let activeConnection = null;
+let activeChannel = null;
+
+function sleep(ms) {
+    return new Promise((resolve) => {
+        setTimeout(resolve, ms);
+    });
+}
+
+async function closeActiveResources() {
+    const channel = activeChannel;
+    const connection = activeConnection;
+    activeChannel = null;
+    activeConnection = null;
+
+    if (channel) {
         try {
             await channel.close();
         } catch (err) {
-            console.error('[photo-worker] Failed to close channel', err);
+            void err;
         }
+    }
+
+    if (connection) {
         try {
             await connection.close();
         } catch (err) {
-            console.error('[photo-worker] Failed to close connection', err);
+            void err;
         }
-        process.exit(0);
-    };
+    }
+}
 
-    process.on('SIGINT', () => {
-        void gracefulShutdown('SIGINT');
-    });
-    process.on('SIGTERM', () => {
-        void gracefulShutdown('SIGTERM');
-    });
+async function runConsumeSession() {
+    const { connection, channel, queue } =
+        await createPhotoConsumerChannel(prefetch);
+    activeConnection = connection;
+    activeChannel = channel;
 
-    connection.on('error', (err) => {
-        console.error('[photo-worker] RabbitMQ connection error:', err);
-    });
-
-    connection.on('close', () => {
-        if (isShuttingDown) {
-            return;
-        }
-        console.error(
-            '[photo-worker] RabbitMQ connection closed unexpectedly. Exiting.',
-        );
-        process.exit(1);
-    });
-
-    await channel.consume(
-        queue,
-        async (message) => {
-            if (!message) {
+    return new Promise((resolve, reject) => {
+        let settled = false;
+        const done = (fn, value) => {
+            if (settled) {
                 return;
             }
+            settled = true;
+            fn(value);
+        };
 
-            let payload;
-            try {
-                payload = JSON.parse(message.content.toString('utf8'));
-            } catch (parseErr) {
-                console.error(
-                    '[photo-worker] Invalid queue message JSON, dropping:',
-                    parseErr,
+        connection.on('error', (err) => {
+            console.error('[photo-worker] RabbitMQ connection error:', err);
+        });
+
+        connection.on('close', () => {
+            if (isShuttingDown) {
+                done(resolve);
+                return;
+            }
+            done(reject, new Error('RabbitMQ connection closed'));
+        });
+
+        channel
+            .consume(
+                queue,
+                async (message) => {
+                    if (!message) {
+                        return;
+                    }
+
+                    let payload;
+                    try {
+                        payload = JSON.parse(message.content.toString('utf8'));
+                    } catch (parseErr) {
+                        console.error(
+                            '[photo-worker] Invalid queue message JSON, dropping:',
+                            parseErr,
+                        );
+                        channel.ack(message);
+                        return;
+                    }
+
+                    try {
+                        await processPhotoJob(payload);
+                        channel.ack(message);
+                    } catch (err) {
+                        console.error(
+                            '[photo-worker] Photo processing failed:',
+                            err,
+                        );
+                        // Do not requeue invalid/unprocessable data forever.
+                        channel.ack(message);
+                    }
+                },
+                { noAck: false },
+            )
+            .then(() => {
+                console.log(
+                    `[photo-worker] Listening queue "${queue}" with prefetch=${prefetch}`,
                 );
-                channel.ack(message);
-                return;
-            }
+            })
+            .catch((err) => {
+                done(reject, err);
+            });
+    });
+}
 
-            try {
-                await processPhotoJob(payload);
-                channel.ack(message);
-            } catch (err) {
-                console.error('[photo-worker] Photo processing failed:', err);
-                // Do not requeue invalid/unprocessable data forever.
-                channel.ack(message);
-            }
-        },
-        { noAck: false },
-    );
+async function gracefulShutdown(signal) {
+    if (isShuttingDown) {
+        return;
+    }
+    isShuttingDown = true;
+    console.log(`[photo-worker] Received ${signal}, shutting down...`);
+    await closeActiveResources();
+    process.exit(0);
+}
 
-    console.log(
-        `[photo-worker] Listening queue "${queue}" with prefetch=${prefetch}`,
-    );
+process.on('SIGINT', () => {
+    void gracefulShutdown('SIGINT');
+});
+process.on('SIGTERM', () => {
+    void gracefulShutdown('SIGTERM');
+});
+
+async function main() {
+    while (!isShuttingDown) {
+        try {
+            await runConsumeSession();
+        } catch (err) {
+            if (isShuttingDown) {
+                break;
+            }
+            console.error(
+                `[photo-worker] RabbitMQ unavailable. Retry in ${retryDelayMs}ms.`,
+                err,
+            );
+            await closeActiveResources();
+            await sleep(retryDelayMs);
+        }
+    }
 }
 
 main().catch((err) => {
-    console.error('[photo-worker] Fatal startup error:', err);
+    console.error('[photo-worker] Fatal worker loop error:', err);
     process.exit(1);
 });
