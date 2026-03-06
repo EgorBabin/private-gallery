@@ -12,6 +12,12 @@ const CARDS_API = '/api/gallery/cards-admin';
 const CATEGORY_RE = /^[A-Za-z]+$/;
 const CARD_PATH_RE = /^\d{1,4}\/[A-Za-z]+$/;
 
+function validationError(message) {
+  const err = new Error(message);
+  err.status = 'warning';
+  return err;
+}
+
 function isEditRoot(pathname) {
   return pathname === '/edit' || pathname === '/edit/';
 }
@@ -146,10 +152,10 @@ export default function GalleryEdit() {
       .replace(/[^0-9]/g, '');
     const category = normalizeCategory(categoryRaw);
     if (!/^\d{1,4}$/.test(year)) {
-      throw new Error('Год должен быть числом, например 2026');
+      throw validationError('Год должен быть числом, например 2026');
     }
     if (!category || !CATEGORY_RE.test(category)) {
-      throw new Error(
+      throw validationError(
         'Категория должна быть только на английском (только буквы)',
       );
     }
@@ -163,12 +169,12 @@ export default function GalleryEdit() {
       const { year, path } = buildPath(createForm.year, createForm.category);
       const title = createForm.title.trim();
       if (!title) {
-        throw new Error('Название карточки обязательно');
+        throw validationError('Название карточки обязательно');
       }
 
       const sortRaw = createForm.sortOrder.trim();
       if (sortRaw && !/^-?\d+$/.test(sortRaw)) {
-        throw new Error('Порядок должен быть целым числом');
+        throw validationError('Порядок должен быть целым числом');
       }
 
       const payload = {
@@ -219,12 +225,12 @@ export default function GalleryEdit() {
     const { year, path } = buildPath(form.year, form.category);
     const title = form.title.trim();
     if (!title) {
-      throw new Error('Название карточки обязательно');
+      throw validationError('Название карточки обязательно');
     }
 
     const sortRaw = form.sortOrder.trim();
     if (!/^-?\d+$/.test(sortRaw)) {
-      throw new Error('Порядок должен быть целым числом');
+      throw validationError('Порядок должен быть целым числом');
     }
 
     return {

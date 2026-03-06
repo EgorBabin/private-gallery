@@ -9,7 +9,7 @@ import { sileo } from 'sileo';
 import { normalizeToastStatus } from '@/utils/apiResponse';
 
 const ICON_PROPS = {
-  size: 16,
+  size: 20,
   strokeWidth: 2.2,
 };
 
@@ -36,10 +36,16 @@ const TOAST_CALL = {
   info: sileo.info,
 };
 
+const SHORT_TITLE_BY_TYPE = {
+  success: 'Готово',
+  warning: 'Внимание',
+  error: 'Ошибка',
+  info: 'Статус',
+  loading: 'Загрузка',
+};
+
 export const sileoDefaultOptions = {
-  fill: 'var(--color-background-elevated)',
-  duration: 3400,
-  roundness: 12,
+  roundness: 16,
   styles: {
     title: 'sileoToastTitle',
     description: 'sileoToastDescription',
@@ -55,10 +61,13 @@ export function notify({
   icon,
 } = {}) {
   const type = normalizeToastStatus(status, { ok: true });
-  const resolvedTitle = String(title || message || 'Готово').trim();
+  const resolvedTitle = String(title || SHORT_TITLE_BY_TYPE[type] || 'Статус')
+    .trim()
+    .slice(0, 28);
+  const resolvedDescription = String(description ?? message ?? '').trim();
   const payload = {
     title: resolvedTitle,
-    description,
+    description: resolvedDescription || undefined,
     duration,
     icon: icon ?? iconByType(type),
   };
@@ -80,7 +89,8 @@ export function notifyError(error, fallbackMessage = 'Что-то пошло н�
 export function notifyLoading(message = 'Загружается...') {
   return sileo.show({
     type: 'loading',
-    title: message,
+    title: SHORT_TITLE_BY_TYPE.loading,
+    description: message,
     duration: null,
     icon: iconByType('loading'),
   });

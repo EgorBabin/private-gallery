@@ -31,7 +31,7 @@ function parseUserId(value) {
 function normalizeUsername(value, { required = false } = {}) {
     if (value === undefined) {
         if (required) {
-            throw new ValidationError('Username обязателен');
+            throw new ValidationError('Имя пользователя обязательно');
         }
         return undefined;
     }
@@ -39,14 +39,14 @@ function normalizeUsername(value, { required = false } = {}) {
     const username = String(value || '').trim();
     if (!username) {
         if (required) {
-            throw new ValidationError('Username обязателен');
+            throw new ValidationError('Имя пользователя обязательно');
         }
         return undefined;
     }
 
     if (!USERNAME_RE.test(username)) {
         throw new ValidationError(
-            'Username: 3-64 символа, только буквы, "_" и "-" без цифр',
+            'Имя пользователя: 3-64 символа, только буквы, "_" и "-" без цифр',
         );
     }
 
@@ -126,7 +126,7 @@ function normalizeTelegramId(value, { required = false } = {}) {
 function normalizeRole(value, { required = false } = {}) {
     if (value === undefined) {
         if (required) {
-            throw new ValidationError('Role обязателен');
+            throw new ValidationError('Роль обязательна');
         }
         return undefined;
     }
@@ -136,13 +136,13 @@ function normalizeRole(value, { required = false } = {}) {
         .toLowerCase();
     if (!role) {
         if (required) {
-            throw new ValidationError('Role обязателен');
+            throw new ValidationError('Роль обязательна');
         }
         return undefined;
     }
 
     if (!ALLOWED_ROLES.has(role)) {
-        throw new ValidationError('Role должен быть user или admin');
+        throw new ValidationError('Роль должна быть user или admin');
     }
 
     return role;
@@ -161,7 +161,7 @@ router.get('/', async (req, res) => {
         console.error(err);
         return sendError(res, {
             httpStatus: 500,
-            message: 'Failed to fetch users',
+            message: 'Не удалось загрузить пользователей',
         });
     }
 });
@@ -195,7 +195,7 @@ router.post('/', async (req, res) => {
             return sendError(res, {
                 httpStatus: 409,
                 status: 'warning',
-                message: 'Пользователь с таким username уже существует',
+                message: 'Пользователь с таким именем уже существует',
             });
         }
 
@@ -210,7 +210,7 @@ router.post('/', async (req, res) => {
         console.error(err);
         sendError(res, {
             httpStatus: 500,
-            message: 'Failed to create user',
+            message: 'Не удалось создать пользователя',
         });
         logAction(req, 'Failed to create user', '#users.js');
     }
@@ -227,12 +227,12 @@ router.delete('/:id', async (req, res) => {
             return sendError(res, {
                 httpStatus: 404,
                 status: 'warning',
-                message: 'User not found',
+                message: 'Пользователь не найден',
             });
         }
 
-        sendSuccess(res, { message: 'User deleted' });
-        logAction(req, 'User deleted', '#users.js');
+        sendSuccess(res, { message: 'Пользователь удалён' });
+        logAction(req, 'Пользователь удалён', '#users.js');
     } catch (err) {
         if (err instanceof ValidationError) {
             return sendError(res, {
@@ -244,9 +244,9 @@ router.delete('/:id', async (req, res) => {
         console.error(err);
         sendError(res, {
             httpStatus: 500,
-            message: 'Failed to delete user',
+            message: 'Не удалось удалить пользователя',
         });
-        logAction(req, 'Failed to delete user', '#users.js');
+        logAction(req, 'Не удалось удалить пользователя', '#users.js');
     }
 });
 
@@ -306,11 +306,11 @@ router.put('/:id', async (req, res) => {
         );
 
         if (rows.length === 0) {
-            logAction(req, 'User not found', '#users.js');
+            logAction(req, 'Пользователь не найден', '#users.js');
             return sendError(res, {
                 httpStatus: 404,
                 status: 'warning',
-                message: 'User not found',
+                message: 'Пользователь не найден',
             });
         }
 
@@ -318,13 +318,13 @@ router.put('/:id', async (req, res) => {
             message: 'Пользователь обновлён',
             payload: { user: normalizeUser(rows[0]) },
         });
-        logAction(req, 'User update', '#users.js');
+        logAction(req, 'Пользователь обновлён', '#users.js');
     } catch (err) {
         if (err?.code === '23505') {
             return sendError(res, {
                 httpStatus: 409,
                 status: 'warning',
-                message: 'Пользователь с таким username уже существует',
+                message: 'Пользователь с таким именем уже существует',
             });
         }
 
@@ -339,9 +339,9 @@ router.put('/:id', async (req, res) => {
         console.error(err);
         sendError(res, {
             httpStatus: 500,
-            message: 'Failed to update user',
+            message: 'Не удалось обновить пользователя',
         });
-        logAction(req, 'Failed to update user', '#users.js');
+        logAction(req, 'Не удалось обновить пользователя', '#users.js');
     }
 });
 

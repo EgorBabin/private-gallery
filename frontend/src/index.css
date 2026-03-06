@@ -79,17 +79,47 @@ h6 {
 }
 
 [data-sileo-toast] {
-  --sileo-width: min(92vw, 420px);
+  --sileo-width: min(94vw, 380px);
+  filter: drop-shadow(0 16px 34px rgba(3, 8, 14, 0.62));
+}
+
+[data-sileo-viewport] {
+  z-index: 1200;
+}
+
+[data-sileo-viewport] svg {
+  width: auto;
+  height: auto;
+}
+
+[data-sileo-svg] {
+  width: 100% !important;
+  height: 100% !important;
+  display: block;
+}
+
+[data-sileo-badge] > svg {
+  width: 18px;
+  height: 18px;
+}
+
+[data-sileo-pill],
+[data-sileo-body] {
+  stroke-width: 1;
 }
 
 .sileoToastTitle {
-  color: var(--color-text-primary);
-  font-size: 0.72rem;
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
 }
 
 .sileoToastDescription {
-  color: var(--color-text-secondary);
-  font-size: 0.62rem;
+  font-size: 0.6rem;
+  line-height: 1.25;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .sileoSpin {

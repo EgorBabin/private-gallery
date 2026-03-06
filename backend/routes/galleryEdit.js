@@ -132,6 +132,17 @@ function isValidationError(err) {
     );
 }
 
+function resolveValidationMessage(
+    err,
+    fallback = 'Некорректные данные запроса',
+) {
+    const message = String(err?.message || '').trim();
+    if (!message) {
+        return fallback;
+    }
+    return /[А-Яа-яЁё]/.test(message) ? message : fallback;
+}
+
 async function signPreviewUrl(previewKey) {
     const normalizedPreviewKey = normalizePreviewInput(previewKey);
     if (!normalizedPreviewKey) {
@@ -181,7 +192,7 @@ router.get('/cards-admin', async (req, res) => {
         console.error('cards-admin error', err);
         sendError(res, {
             httpStatus: 500,
-            message: 'Failed to fetch cards',
+            message: 'Не удалось загрузить карточки',
         });
         logAction(
             req,
@@ -248,20 +259,20 @@ router.post('/cards-admin', async (req, res) => {
             return sendError(res, {
                 httpStatus: 409,
                 status: 'warning',
-                message: 'Карточка с таким path уже есть',
+                message: 'Карточка с таким путём уже есть',
             });
         }
         if (isValidationError(err)) {
             return sendError(res, {
                 httpStatus: 400,
                 status: 'warning',
-                message: err.message,
+                message: resolveValidationMessage(err),
             });
         }
         console.error('create card error', err);
         sendError(res, {
             httpStatus: 500,
-            message: 'Failed to create card',
+            message: 'Не удалось создать карточку',
         });
     }
 });
@@ -305,7 +316,7 @@ router.put('/cards-admin/:id', async (req, res) => {
             return sendError(res, {
                 httpStatus: 404,
                 status: 'warning',
-                message: 'Card not found',
+                message: 'Карточка не найдена',
             });
         }
 
@@ -327,20 +338,20 @@ router.put('/cards-admin/:id', async (req, res) => {
             return sendError(res, {
                 httpStatus: 409,
                 status: 'warning',
-                message: 'Карточка с таким path уже есть',
+                message: 'Карточка с таким путём уже есть',
             });
         }
         if (isValidationError(err)) {
             return sendError(res, {
                 httpStatus: 400,
                 status: 'warning',
-                message: err.message,
+                message: resolveValidationMessage(err),
             });
         }
         console.error('update card error', err);
         sendError(res, {
             httpStatus: 500,
-            message: 'Failed to update card',
+            message: 'Не удалось обновить карточку',
         });
     }
 });
@@ -352,7 +363,7 @@ router.delete('/cards-admin/:id', async (req, res) => {
             return sendError(res, {
                 httpStatus: 404,
                 status: 'warning',
-                message: 'Card not found',
+                message: 'Карточка не найдена',
             });
         }
         sendSuccess(res, {
@@ -370,13 +381,13 @@ router.delete('/cards-admin/:id', async (req, res) => {
             return sendError(res, {
                 httpStatus: 400,
                 status: 'warning',
-                message: err.message,
+                message: resolveValidationMessage(err),
             });
         }
         console.error('delete card error', err);
         sendError(res, {
             httpStatus: 500,
-            message: 'Failed to delete card',
+            message: 'Не удалось удалить карточку',
         });
     }
 });
@@ -406,7 +417,7 @@ router.post('/upload', upload.single('image'), async (req, res) => {
             return sendError(res, {
                 httpStatus: 400,
                 status: 'warning',
-                message: 'No file uploaded',
+                message: 'Файл не загружен',
             });
         }
 
@@ -493,7 +504,7 @@ router.post('/upload', upload.single('image'), async (req, res) => {
         if (!res.headersSent) {
             sendError(res, {
                 httpStatus: 500,
-                message: 'Upload failed',
+                message: 'Не удалось загрузить файл',
             });
             logAction(
                 req,
@@ -860,7 +871,7 @@ router.get('/reconcile', async (req, res) => {
         if (!res.headersSent) {
             sendError(res, {
                 httpStatus: 500,
-                message: 'Internal error',
+                message: 'Внутренняя ошибка',
             });
         }
     }
@@ -885,7 +896,7 @@ router.use((err, req, res, next) => {
         return sendError(res, {
             httpStatus: 400,
             status: 'warning',
-            message: err.message || 'Upload error',
+            message: err.message || 'Ошибка загрузки',
         });
     }
 
