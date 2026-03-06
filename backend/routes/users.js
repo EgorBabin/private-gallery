@@ -1,6 +1,7 @@
 import express from 'express';
 import pool from '../db.js';
 import { logAction } from '../utils/logger.js';
+import { sendError, sendSuccess } from '../utils/apiResponse.js';
 
 const router = express.Router();
 
@@ -152,10 +153,16 @@ router.get('/', async (req, res) => {
         const { rows } = await pool.query(
             'SELECT id, username, email, telegramID, role, created_at, is_active FROM users ORDER BY id ASC',
         );
-        res.json(rows.map(normalizeUser));
+        return sendSuccess(res, {
+            message: 'Пользователи загружены',
+            payload: { users: rows.map(normalizeUser) },
+        });
     } catch (err) {
         console.error(err);
-        res.status(500).json({ error: 'Failed to fetch users' });
+        return sendError(res, {
+            httpStatus: 500,
+            message: 'Failed to fetch users',
+        });
     }
 });
 
@@ -178,20 +185,33 @@ router.post('/', async (req, res) => {
             [username, email, telegramID, role],
         );
         logAction(req, 'Добавлен новый пользователь', '#users.js');
-        res.status(201).json(normalizeUser(rows[0]));
+        return sendSuccess(res, {
+            httpStatus: 201,
+            message: 'Пользователь создан',
+            payload: { user: normalizeUser(rows[0]) },
+        });
     } catch (err) {
         if (err?.code === '23505') {
-            return res.status(409).json({
-                error: 'Пользователь с таким username уже существует',
+            return sendError(res, {
+                httpStatus: 409,
+                status: 'warning',
+                message: 'Пользователь с таким username уже существует',
             });
         }
 
         if (err instanceof ValidationError) {
-            return res.status(400).json({ error: err.message });
+            return sendError(res, {
+                httpStatus: 400,
+                status: 'warning',
+                message: err.message,
+            });
         }
 
         console.error(err);
-        res.status(500).json({ error: 'Failed to create user' });
+        sendError(res, {
+            httpStatus: 500,
+            message: 'Failed to create user',
+        });
         logAction(req, 'Failed to create user', '#users.js');
     }
 });
@@ -204,17 +224,28 @@ router.delete('/:id', async (req, res) => {
             [id],
         );
         if (rowCount === 0) {
-            return res.status(404).json({ error: 'User not found' });
+            return sendError(res, {
+                httpStatus: 404,
+                status: 'warning',
+                message: 'User not found',
+            });
         }
 
-        res.json({ message: 'User deleted' });
+        sendSuccess(res, { message: 'User deleted' });
         logAction(req, 'User deleted', '#users.js');
     } catch (err) {
         if (err instanceof ValidationError) {
-            return res.status(400).json({ error: err.message });
+            return sendError(res, {
+                httpStatus: 400,
+                status: 'warning',
+                message: err.message,
+            });
         }
         console.error(err);
-        res.status(500).json({ error: 'Failed to delete user' });
+        sendError(res, {
+            httpStatus: 500,
+            message: 'Failed to delete user',
+        });
         logAction(req, 'Failed to delete user', '#users.js');
     }
 });
@@ -246,7 +277,11 @@ router.put('/:id', async (req, res) => {
         }
 
         if (Object.keys(patch).length === 0) {
-            return res.status(400).json({ error: 'Нет полей для обновления' });
+            return sendError(res, {
+                httpStatus: 400,
+                status: 'warning',
+                message: 'Нет полей для обновления',
+            });
         }
 
         const values = [];
@@ -272,24 +307,40 @@ router.put('/:id', async (req, res) => {
 
         if (rows.length === 0) {
             logAction(req, 'User not found', '#users.js');
-            return res.status(404).json({ error: 'User not found' });
+            return sendError(res, {
+                httpStatus: 404,
+                status: 'warning',
+                message: 'User not found',
+            });
         }
 
-        res.json(normalizeUser(rows[0]));
+        sendSuccess(res, {
+            message: 'Пользователь обновлён',
+            payload: { user: normalizeUser(rows[0]) },
+        });
         logAction(req, 'User update', '#users.js');
     } catch (err) {
         if (err?.code === '23505') {
-            return res.status(409).json({
-                error: 'Пользователь с таким username уже существует',
+            return sendError(res, {
+                httpStatus: 409,
+                status: 'warning',
+                message: 'Пользователь с таким username уже существует',
             });
         }
 
         if (err instanceof ValidationError) {
-            return res.status(400).json({ error: err.message });
+            return sendError(res, {
+                httpStatus: 400,
+                status: 'warning',
+                message: err.message,
+            });
         }
 
         console.error(err);
-        res.status(500).json({ error: 'Failed to update user' });
+        sendError(res, {
+            httpStatus: 500,
+            message: 'Failed to update user',
+        });
         logAction(req, 'Failed to update user', '#users.js');
     }
 });

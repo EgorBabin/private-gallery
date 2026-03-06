@@ -21,6 +21,7 @@ import {
 } from '../utils/galleryCardSync.js';
 import { publishPhotoJob } from '../utils/rabbitmq.js';
 import { logAction } from '../utils/logger.js';
+import { sendError, sendSuccess } from '../utils/apiResponse.js';
 
 const router = express.Router();
 
@@ -171,11 +172,17 @@ router.get('/cards-admin', async (req, res) => {
             },
         );
 
-        res.json({ cards });
+        sendSuccess(res, {
+            message: 'Карточки загружены',
+            payload: { cards },
+        });
         logAction(req, 'Get cards-admin', '#galleryEdit.js #cards-admin');
     } catch (err) {
         console.error('cards-admin error', err);
-        res.status(500).json({ error: 'Failed to fetch cards' });
+        sendError(res, {
+            httpStatus: 500,
+            message: 'Failed to fetch cards',
+        });
         logAction(
             req,
             'cards-admin error',
@@ -193,16 +200,21 @@ router.post('/cards-admin', async (req, res) => {
             `${String(body.year || '').trim()}/${String(body.category || '').trim()}`;
         const parsedPath = parseCardPath(pathFromBody);
         if (!parsedPath) {
-            return res.status(400).json({
-                error: 'Некорректный path. Используйте формат "year/category"',
+            return sendError(res, {
+                httpStatus: 400,
+                status: 'warning',
+                message:
+                    'Некорректный path. Используйте формат "year/category"',
             });
         }
 
         const title = String(body.title ?? parsedPath.category).trim();
         if (!title) {
-            return res
-                .status(400)
-                .json({ error: 'Название карточки обязательно' });
+            return sendError(res, {
+                httpStatus: 400,
+                status: 'warning',
+                message: 'Название карточки обязательно',
+            });
         }
 
         const previewKey = normalizePreviewInput(body.previewKey);
@@ -218,8 +230,12 @@ router.post('/cards-admin', async (req, res) => {
         const synced = await syncCardByPath(created.path, previewKey);
         const thumbnailUrl = await signPreviewUrl(synced.previewKey);
 
-        res.status(201).json({
-            card: toCardResponse(synced, { thumbnailUrl }),
+        sendSuccess(res, {
+            httpStatus: 201,
+            message: 'Карточка создана',
+            payload: {
+                card: toCardResponse(synced, { thumbnailUrl }),
+            },
         });
         logAction(
             req,
@@ -229,15 +245,24 @@ router.post('/cards-admin', async (req, res) => {
         );
     } catch (err) {
         if (err?.code === '23505') {
-            return res
-                .status(409)
-                .json({ error: 'Карточка с таким path уже есть' });
+            return sendError(res, {
+                httpStatus: 409,
+                status: 'warning',
+                message: 'Карточка с таким path уже есть',
+            });
         }
         if (isValidationError(err)) {
-            return res.status(400).json({ error: err.message });
+            return sendError(res, {
+                httpStatus: 400,
+                status: 'warning',
+                message: err.message,
+            });
         }
         console.error('create card error', err);
-        res.status(500).json({ error: 'Failed to create card' });
+        sendError(res, {
+            httpStatus: 500,
+            message: 'Failed to create card',
+        });
     }
 });
 
@@ -254,8 +279,11 @@ router.put('/cards-admin/:id', async (req, res) => {
         if (patch.path !== undefined) {
             const parsedPath = parseCardPath(patch.path);
             if (!parsedPath) {
-                return res.status(400).json({
-                    error: 'Некорректный path. Используйте формат "year/category"',
+                return sendError(res, {
+                    httpStatus: 400,
+                    status: 'warning',
+                    message:
+                        'Некорректный path. Используйте формат "year/category"',
                 });
             }
             patch.path = parsedPath.path;
@@ -274,13 +302,20 @@ router.put('/cards-admin/:id', async (req, res) => {
 
         const updated = await updateCard(req.params.id, patch);
         if (!updated) {
-            return res.status(404).json({ error: 'Card not found' });
+            return sendError(res, {
+                httpStatus: 404,
+                status: 'warning',
+                message: 'Card not found',
+            });
         }
 
         const synced = await syncCardByPath(updated.path, patch.previewKey);
         const thumbnailUrl = await signPreviewUrl(synced.previewKey);
 
-        res.json({ card: toCardResponse(synced, { thumbnailUrl }) });
+        sendSuccess(res, {
+            message: 'Карточка обновлена',
+            payload: { card: toCardResponse(synced, { thumbnailUrl }) },
+        });
         logAction(
             req,
             'Updated card',
@@ -289,15 +324,24 @@ router.put('/cards-admin/:id', async (req, res) => {
         );
     } catch (err) {
         if (err?.code === '23505') {
-            return res
-                .status(409)
-                .json({ error: 'Карточка с таким path уже есть' });
+            return sendError(res, {
+                httpStatus: 409,
+                status: 'warning',
+                message: 'Карточка с таким path уже есть',
+            });
         }
         if (isValidationError(err)) {
-            return res.status(400).json({ error: err.message });
+            return sendError(res, {
+                httpStatus: 400,
+                status: 'warning',
+                message: err.message,
+            });
         }
         console.error('update card error', err);
-        res.status(500).json({ error: 'Failed to update card' });
+        sendError(res, {
+            httpStatus: 500,
+            message: 'Failed to update card',
+        });
     }
 });
 
@@ -305,9 +349,16 @@ router.delete('/cards-admin/:id', async (req, res) => {
     try {
         const deleted = await deleteCard(req.params.id);
         if (!deleted) {
-            return res.status(404).json({ error: 'Card not found' });
+            return sendError(res, {
+                httpStatus: 404,
+                status: 'warning',
+                message: 'Card not found',
+            });
         }
-        res.json({ card: toCardResponse(deleted) });
+        sendSuccess(res, {
+            message: 'Карточка удалена',
+            payload: { card: toCardResponse(deleted) },
+        });
         logAction(
             req,
             'Deleted card',
@@ -316,10 +367,17 @@ router.delete('/cards-admin/:id', async (req, res) => {
         );
     } catch (err) {
         if (isValidationError(err)) {
-            return res.status(400).json({ error: err.message });
+            return sendError(res, {
+                httpStatus: 400,
+                status: 'warning',
+                message: err.message,
+            });
         }
         console.error('delete card error', err);
-        res.status(500).json({ error: 'Failed to delete card' });
+        sendError(res, {
+            httpStatus: 500,
+            message: 'Failed to delete card',
+        });
     }
 });
 
@@ -329,8 +387,11 @@ router.post('/upload', upload.single('image'), async (req, res) => {
         const parsedFolderPath = parseCardPath(req.body.path);
         if (!parsedFolderPath) {
             logAction(req, 'Missing path', '#galleryEdit.js #upload #error');
-            return res.status(400).json({
-                error: 'Некорректный path. Используйте формат "year/category"',
+            return sendError(res, {
+                httpStatus: 400,
+                status: 'warning',
+                message:
+                    'Некорректный path. Используйте формат "year/category"',
             });
         }
 
@@ -342,7 +403,11 @@ router.post('/upload', upload.single('image'), async (req, res) => {
                 'No file uploaded',
                 '#galleryEdit.js #upload #error',
             );
-            return res.status(400).json({ error: 'No file uploaded' });
+            return sendError(res, {
+                httpStatus: 400,
+                status: 'warning',
+                message: 'No file uploaded',
+            });
         }
 
         await ensureCardExists(folderPath);
@@ -386,10 +451,15 @@ router.post('/upload', upload.single('image'), async (req, res) => {
             cleanupSource: videoFlag,
         });
 
-        res.status(202).json({
-            success: true,
-            filename: baseName,
-            statusKey,
+        sendSuccess(res, {
+            httpStatus: 202,
+            status: 'accepted',
+            message: 'Файл принят в обработку',
+            payload: {
+                success: true,
+                filename: baseName,
+                statusKey,
+            },
         });
         logAction(
             req,
@@ -421,7 +491,10 @@ router.post('/upload', upload.single('image'), async (req, res) => {
             }
         }
         if (!res.headersSent) {
-            res.status(500).json({ error: 'Upload failed' });
+            sendError(res, {
+                httpStatus: 500,
+                message: 'Upload failed',
+            });
             logAction(
                 req,
                 'Upload failed',
@@ -446,8 +519,11 @@ router.get('/reconcile', async (req, res) => {
                 'Prefix required',
                 '#galleryEdit.js #reconcile #error',
             );
-            return res.status(400).json({
-                error: 'Некорректный prefix. Используйте формат "year/category"',
+            return sendError(res, {
+                httpStatus: 400,
+                status: 'warning',
+                message:
+                    'Некорректный prefix. Используйте формат "year/category"',
             });
         }
 
@@ -467,7 +543,12 @@ router.get('/reconcile', async (req, res) => {
             statusKey,
         );
 
-        res.status(202).json({ status: 'accepted', statusKey });
+        sendSuccess(res, {
+            httpStatus: 202,
+            status: 'accepted',
+            message: 'Задача на восстановление принята',
+            payload: { statusKey },
+        });
         logAction(
             req,
             'accepted',
@@ -777,7 +858,10 @@ router.get('/reconcile', async (req, res) => {
     } catch (err) {
         console.error('reconcile route error:', err);
         if (!res.headersSent) {
-            res.status(500).json({ error: 'Internal error' });
+            sendError(res, {
+                httpStatus: 500,
+                message: 'Internal error',
+            });
         }
     }
 });
@@ -792,15 +876,24 @@ router.use((err, req, res, next) => {
 
     if (err instanceof multer.MulterError) {
         if (err.code === 'LIMIT_FILE_SIZE') {
-            return res.status(413).json({
-                error: `Файл слишком большой. Максимум ${Math.floor(MAX_UPLOAD_BYTES / (1024 * 1024))}MB`,
+            return sendError(res, {
+                httpStatus: 413,
+                status: 'warning',
+                message: `Файл слишком большой. Максимум ${Math.floor(MAX_UPLOAD_BYTES / (1024 * 1024))}MB`,
             });
         }
-        return res.status(400).json({ error: err.message || 'Upload error' });
+        return sendError(res, {
+            httpStatus: 400,
+            status: 'warning',
+            message: err.message || 'Upload error',
+        });
     }
 
-    return res.status(400).json({
-        error: 'Неподдерживаемый тип файла. Разрешены JPEG/PNG/WEBP/AVIF/GIF/TIFF',
+    return sendError(res, {
+        httpStatus: 400,
+        status: 'warning',
+        message:
+            'Неподдерживаемый тип файла. Разрешены JPEG/PNG/WEBP/AVIF/GIF/TIFF',
     });
 });
 

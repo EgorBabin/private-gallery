@@ -4,6 +4,8 @@ import { useTitle } from '@/hooks/useTitle';
 import { useCsrfFetch } from '@/hooks/useCsrfFetch';
 import { useWarnOnUnload } from '@/hooks/useWarnOnUnload';
 import { useVibration } from '@/hooks/useVibration';
+import { parseApiResponse } from '@/utils/apiResponse';
+import { notify, notifyError } from '@/utils/notifications';
 
 export default function UsersPage() {
   useTitle('Пользователи');
@@ -18,7 +20,6 @@ export default function UsersPage() {
     role: 'user',
   });
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
 
   // флаг несохранённые изменения для хука
   const [isDirty, setIsDirty] = useState(false);
@@ -28,14 +29,22 @@ export default function UsersPage() {
   // Получение списка пользователей
   const fetchUsers = useCallback(async () => {
     setLoading(true);
-    setError(null);
     try {
       const res = await csrfFetch('/api/users');
-      if (!res.ok) throw new Error('Ошибка загрузки', vibrate('false'));
-      const data = await res.json();
-      setUsers(data);
+      const { data } = await parseApiResponse(
+        res,
+        'Не удалось загрузить пользователей',
+      );
+
+      const usersList = Array.isArray(data?.users)
+        ? data.users
+        : Array.isArray(data)
+          ? data
+          : [];
+      setUsers(usersList);
     } catch (e) {
-      setError(e.message);
+      vibrate('false');
+      notifyError(e, 'Не удалось загрузить пользователей');
     } finally {
       setLoading(false);
     }
@@ -53,7 +62,6 @@ export default function UsersPage() {
 
   async function handleAdd(e) {
     e.preventDefault();
-    setError(null);
     try {
       const res = await csrfFetch('/api/users', {
         method: 'POST',
@@ -61,22 +69,25 @@ export default function UsersPage() {
         body: JSON.stringify(form),
       });
 
-      const data = await res.json();
+      const { data, message, status } = await parseApiResponse(
+        res,
+        'Не удалось создать пользователя',
+      );
+      const createdUser = data?.user || data;
 
-      if (!res.ok) {
-        throw new Error(
-          data.error || 'Ошибка создания пользователя',
-          vibrate('false'),
-        );
-      }
-
-      setUsers((prev) => [...prev, data]);
+      setUsers((prev) => [...prev, createdUser]);
       setForm({ username: '', email: '', telegramID: '', role: 'user' });
+      notify({
+        status,
+        message:
+          message ||
+          `Пользователь ${createdUser?.username || form.username} создан`,
+      });
 
       setIsDirty(false); // сбрасываем грязь, после сохранения
     } catch (e) {
       vibrate('warn');
-      setError(e.message);
+      notifyError(e, 'Не удалось создать пользователя');
     }
   }
 
@@ -87,11 +98,16 @@ export default function UsersPage() {
       const res = await csrfFetch(`/api/users/${id}`, {
         method: 'DELETE',
       });
-      if (!res.ok) throw new Error('Ошибка удаления', vibrate('false'));
+
+      const { message, status } = await parseApiResponse(
+        res,
+        'Не удалось удалить пользователя',
+      );
       setUsers((prev) => prev.filter((u) => u.id !== id));
+      notify({ status, message: message || 'Пользователь удалён' });
     } catch (e) {
       vibrate('false');
-      setError(e.message);
+      notifyError(e, 'Не удалось удалить пользователя');
     }
   }
 
@@ -103,12 +119,16 @@ export default function UsersPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updatedFields),
       });
-      if (!res.ok) throw new Error('Ошибка обновления', vibrate('false'));
-      const updatedUser = await res.json();
+
+      const { data } = await parseApiResponse(
+        res,
+        'Не удалось обновить пользователя',
+      );
+      const updatedUser = data?.user || data;
       setUsers((prev) => prev.map((u) => (u.id === id ? updatedUser : u)));
     } catch (e) {
       vibrate('false');
-      setError(e.message);
+      notifyError(e, 'Не удалось обновить пользователя');
     }
   }
 
@@ -199,9 +219,6 @@ export default function UsersPage() {
           </table>
         </div>
       )}
-
-      {error && <div className={styles.error}>{error}</div>}
-
       <h2>Добавить пользователя</h2>
       <div className={styles.formWrap}>
         <form onSubmit={handleAdd}>

@@ -32,6 +32,8 @@
   /* Status */
   --color-danger: #a34a4a;
   --color-danger-hover: #833737;
+  --color-warning: #d7ac62;
+  --color-success: #5eb2ae;
 
   /* App background gradient (kept subtle for gallery focus) */
   --color-app-bg-radial-1: rgba(128, 159, 236, 0.05);
@@ -99,4 +101,12 @@
 
   /* Upload */
   --color-upload-dropzone-border: rgba(231, 237, 246, 0.14);
+
+  /* Sileo notifications */
+  --sileo-state-success: var(--color-success);
+  --sileo-state-loading: var(--color-text-secondary);
+  --sileo-state-error: var(--color-text-danger);
+  --sileo-state-warning: var(--color-warning);
+  --sileo-state-info: var(--accent-1);
+  --sileo-state-action: var(--accent-1-strong);
 }

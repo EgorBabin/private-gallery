@@ -1,8 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { CornerLeftUp, CornerRightDown } from 'lucide-react';
+import { sileo } from 'sileo';
 import { useCsrfFetch } from '@/hooks/useCsrfFetch';
 import { useCheckSession } from '@/hooks/useCheckSession';
+import { parseApiResponse } from '@/utils/apiResponse';
+import { notify, notifyError, notifyLoading } from '@/utils/notifications';
 import styles from './GalleryEdit.module.css';
 
 const CARDS_API = '/api/gallery/cards-admin';
@@ -18,17 +21,6 @@ function normalizeCategory(value) {
     .trim()
     .replace(/[^a-zA-Z]/g, '')
     .toLowerCase();
-}
-
-async function parseJsonResponse(res) {
-  const contentType = res.headers.get('content-type') || '';
-  const data = contentType.includes('application/json')
-    ? await res.json()
-    : null;
-  if (!res.ok) {
-    throw new Error(data?.error || `Ошибка ${res.status}`);
-  }
-  return data;
 }
 
 function toEditForm(card) {
@@ -61,7 +53,6 @@ export default function GalleryEdit() {
 
   const [cards, setCards] = useState([]);
   const [cardsLoading, setCardsLoading] = useState(true);
-  const [cardsStatus, setCardsStatus] = useState('');
   const [busyCardId, setBusyCardId] = useState(null);
 
   const [createForm, setCreateForm] = useState({
@@ -76,7 +67,6 @@ export default function GalleryEdit() {
 
   const [file, setFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState('');
-  const [uploadStatus, setUploadStatus] = useState('');
   const [isVideo, setIsVideo] = useState(false);
 
   useEffect(() => {
@@ -102,7 +92,10 @@ export default function GalleryEdit() {
         return;
       }
 
-      const data = await parseJsonResponse(res);
+      const { data } = await parseApiResponse(
+        res,
+        'Не удалось загрузить карточки',
+      );
       const list = Array.isArray(data?.cards) ? data.cards : [];
 
       setCards(list);
@@ -110,7 +103,7 @@ export default function GalleryEdit() {
         Object.fromEntries(list.map((card) => [card.id, toEditForm(card)])),
       );
     } catch (err) {
-      setCardsStatus(err.message || 'Не удалось загрузить карточки');
+      notifyError(err, 'Не удалось загрузить карточки');
     } finally {
       setCardsLoading(false);
     }
@@ -192,10 +185,16 @@ export default function GalleryEdit() {
         method: 'POST',
         body: JSON.stringify(payload),
       });
-      const data = await parseJsonResponse(res);
+      const { data, message, status } = await parseApiResponse(
+        res,
+        'Не удалось создать карточку',
+      );
 
       const createdPath = data?.card?.path || path;
-      setCardsStatus(`Карточка создана: ${createdPath}`);
+      notify({
+        status,
+        message: message || `Карточка создана: ${createdPath}`,
+      });
       setCreateForm((prev) => ({
         ...prev,
         category: '',
@@ -207,7 +206,7 @@ export default function GalleryEdit() {
       await loadCards();
       nav(`/edit/${createdPath}`);
     } catch (err) {
-      setCardsStatus(err.message || 'Не удалось создать карточку');
+      notifyError(err, 'Не удалось создать карточку');
     }
   };
 
@@ -247,16 +246,22 @@ export default function GalleryEdit() {
         method: 'PUT',
         body: JSON.stringify(payload),
       });
-      await parseJsonResponse(res);
+      const { message, status } = await parseApiResponse(
+        res,
+        'Не удалось сохранить карточку',
+      );
 
-      setCardsStatus(`Карточка обновлена: ${payload.path}`);
+      notify({
+        status,
+        message: message || `Карточка обновлена: ${payload.path}`,
+      });
       await loadCards();
 
       if (targetPathFromUrl === oldPath && oldPath !== payload.path) {
         nav(`/edit/${payload.path}`);
       }
     } catch (err) {
-      setCardsStatus(err.message || 'Не удалось сохранить карточку');
+      notifyError(err, 'Не удалось сохранить карточку');
     } finally {
       setBusyCardId(null);
     }
@@ -273,15 +278,21 @@ export default function GalleryEdit() {
       const res = await csrfFetch(`${CARDS_API}/${card.id}`, {
         method: 'DELETE',
       });
-      await parseJsonResponse(res);
-      setCardsStatus(`Карточка удалена: ${card.path}`);
+      const { message, status } = await parseApiResponse(
+        res,
+        'Не удалось удалить карточку',
+      );
+      notify({
+        status,
+        message: message || `Карточка удалена: ${card.path}`,
+      });
 
       if (targetPathFromUrl === card.path) {
         nav('/edit');
       }
       await loadCards();
     } catch (err) {
-      setCardsStatus(err.message || 'Не удалось удалить карточку');
+      notifyError(err, 'Не удалось удалить карточку');
     } finally {
       setBusyCardId(null);
     }
@@ -310,11 +321,18 @@ export default function GalleryEdit() {
           body: JSON.stringify({ sortOrder: current.sortOrder }),
         }),
       ]);
-      await Promise.all(responses.map((res) => parseJsonResponse(res)));
-      setCardsStatus(`Порядок обновлён: ${current.path}`);
+      const parsed = await Promise.all(
+        responses.map((res) =>
+          parseApiResponse(res, 'Не удалось изменить порядок'),
+        ),
+      );
+      notify({
+        status: parsed[0]?.status || 'success',
+        message: `Порядок обновлён: ${current.path}`,
+      });
       await loadCards();
     } catch (err) {
-      setCardsStatus(err.message || 'Не удалось изменить порядок');
+      notifyError(err, 'Не удалось изменить порядок');
     } finally {
       setBusyCardId(null);
     }
@@ -322,7 +340,10 @@ export default function GalleryEdit() {
 
   const handleCreateCardFromPath = async () => {
     if (!CARD_PATH_RE.test(targetPathFromUrl)) {
-      setUploadStatus('Некорректный путь в URL, ожидается /edit/year/category');
+      notify({
+        status: 'warning',
+        message: 'Некорректный путь в URL, ожидается /edit/year/category',
+      });
       return;
     }
 
@@ -335,11 +356,17 @@ export default function GalleryEdit() {
           title: category,
         }),
       });
-      await parseJsonResponse(res);
-      setUploadStatus(`Карточка создана: ${targetPathFromUrl}`);
+      const { message, status } = await parseApiResponse(
+        res,
+        'Не удалось создать карточку',
+      );
+      notify({
+        status,
+        message: message || `Карточка создана: ${targetPathFromUrl}`,
+      });
       await loadCards();
     } catch (err) {
-      setUploadStatus(err.message || 'Не удалось создать карточку');
+      notifyError(err, 'Не удалось создать карточку');
     }
   };
 
@@ -347,15 +374,24 @@ export default function GalleryEdit() {
 
   const handleUpload = async () => {
     if (!canUpload) {
-      setUploadStatus('Сначала откройте /edit/year/category');
+      notify({
+        status: 'warning',
+        message: 'Сначала откройте /edit/year/category',
+      });
       return;
     }
     if (!file) {
-      setUploadStatus('Прикрепите файл');
+      notify({
+        status: 'warning',
+        message: 'Прикрепите файл',
+      });
       return;
     }
     if (!file.type.startsWith('image/')) {
-      setUploadStatus('Можно загружать только изображения (превью)');
+      notify({
+        status: 'warning',
+        message: 'Можно загружать только изображения (превью)',
+      });
       return;
     }
 
@@ -366,21 +402,28 @@ export default function GalleryEdit() {
       formData.append('video', 'true');
     }
 
-    setUploadStatus('Загружается...');
+    const loadingToastId = notifyLoading('Загружается...');
 
     try {
       const res = await csrfFetch('/api/gallery/upload', {
         method: 'POST',
         body: formData,
       });
-      await parseJsonResponse(res);
-      setUploadStatus(
-        'Файл принят. Количество фото обновится после обработки.',
+      const { message, status } = await parseApiResponse(
+        res,
+        'Ошибка загрузки',
       );
+      notify({
+        status,
+        message:
+          message || 'Файл принят. Количество фото обновится после обработки.',
+      });
       setFile(null);
       setIsVideo(false);
     } catch (err) {
-      setUploadStatus(err.message || 'Ошибка загрузки');
+      notifyError(err, 'Ошибка загрузки');
+    } finally {
+      sileo.dismiss(loadingToastId);
     }
   };
 
@@ -446,9 +489,6 @@ export default function GalleryEdit() {
             </div>
             <button type="submit">Создать</button>
           </form>
-
-          {cardsStatus && <p className={styles.status}>{cardsStatus}</p>}
-
           <div className={styles.tableWrap}>
             <table className={styles.table}>
               <thead>
@@ -647,7 +687,6 @@ export default function GalleryEdit() {
           <button type="button" onClick={handleUpload}>
             Загрузить
           </button>
-          {uploadStatus && <p className={styles.status}>{uploadStatus}</p>}
         </section>
       )}
     </div>
