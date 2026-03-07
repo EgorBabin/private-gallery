@@ -616,20 +616,10 @@ router.post('/upload', upload.single('image'), async (req, res) => {
             'application/json',
         );
 
-        await publishPhotoJob({
-            folderPath,
-            baseName,
-            sourceKey,
-            originalKey: videoFlag ? null : originalKey,
-            statusKey,
-            videoFlag,
-            cleanupSource: videoFlag,
-        });
-
         sendSuccess(res, {
-            httpStatus: 202,
-            status: 'accepted',
-            message: 'Файл принят в обработку',
+            httpStatus: 200,
+            status: 'success',
+            message: 'Файл загружен и поставлен в обработку',
             payload: {
                 success: true,
                 filename: baseName,
@@ -642,6 +632,48 @@ router.post('/upload', upload.single('image'), async (req, res) => {
             `${baseName}
             #galleryEdit.js #upload`,
         );
+
+        void (async () => {
+            try {
+                await publishPhotoJob({
+                    folderPath,
+                    baseName,
+                    sourceKey,
+                    originalKey: videoFlag ? null : originalKey,
+                    statusKey,
+                    videoFlag,
+                    cleanupSource: videoFlag,
+                });
+            } catch (publishErr) {
+                console.error('Failed to publish upload job:', publishErr);
+                if (statusKey) {
+                    try {
+                        await uploadToS3(
+                            Buffer.from(
+                                JSON.stringify({
+                                    status: 'error',
+                                    error: String(publishErr),
+                                    at: new Date().toISOString(),
+                                }),
+                            ),
+                            statusKey,
+                            'application/json',
+                        );
+                    } catch (statusErr) {
+                        console.error(
+                            'Failed to write publish error status:',
+                            statusErr,
+                        );
+                    }
+                }
+                logAction(
+                    req,
+                    'Upload publish failed',
+                    `${publishErr}
+                    #galleryEdit.js #upload #publish-error`,
+                );
+            }
+        })();
         return;
     } catch (err) {
         console.error('Upload route error:', err);

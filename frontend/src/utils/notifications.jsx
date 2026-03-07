@@ -44,6 +44,13 @@ const SHORT_TITLE_BY_TYPE = {
   loading: 'Загрузка',
 };
 
+let loadingToastCounter = 0;
+
+function nextLoadingToastId() {
+  loadingToastCounter = (loadingToastCounter + 1) % 1_000_000;
+  return `loading-${Date.now()}-${loadingToastCounter}`;
+}
+
 export const sileoDefaultOptions = {
   roundness: 16,
   styles: {
@@ -88,6 +95,7 @@ export function notifyError(error, fallbackMessage = 'Что-то пошло н�
 
 export function notifyLoading(message = 'Загружается...') {
   return sileo.show({
+    id: nextLoadingToastId(),
     type: 'loading',
     title: SHORT_TITLE_BY_TYPE.loading,
     description: message,
