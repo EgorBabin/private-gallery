@@ -5,6 +5,7 @@ import {
     deleteFromS3,
 } from '../utils/s3Client.js';
 import { syncCardByPath } from '../utils/galleryCardSync.js';
+import { processGalleryReorderJob } from './galleryReorderJobProcessor.js';
 
 sharp.concurrency(1);
 sharp.cache(false);
@@ -19,8 +20,10 @@ const SCREEN_SIZES = [
 const VIDEO_DIRS = ['video_1440', 'video_1080', 'video_720'];
 const WEBP_OPTIONS = { quality: 85, effort: 6 };
 const SHARP_INPUT_OPTIONS = { failOn: 'truncated' };
+const JOB_TYPE_UPLOAD = 'photo-upload';
+const JOB_TYPE_REORDER = 'gallery-reorder';
 
-function normalizeJob(rawPayload) {
+function normalizeUploadJob(rawPayload) {
     const payload =
         rawPayload && typeof rawPayload === 'object' ? rawPayload : {};
     const folderPath = String(payload.folderPath || '').trim();
@@ -165,8 +168,8 @@ async function uploadOutputsAtomically(outputs) {
     }
 }
 
-export async function processPhotoJob(rawPayload) {
-    const job = normalizeJob(rawPayload);
+async function processUploadJob(rawPayload) {
+    const job = normalizeUploadJob(rawPayload);
     const startedAt = new Date().toISOString();
 
     await safeWriteStatus(job.statusKey, {
@@ -236,4 +239,18 @@ export async function processPhotoJob(rawPayload) {
     }
 
     return { uploadedKeys };
+}
+
+export async function processPhotoJob(rawPayload) {
+    const payload =
+        rawPayload && typeof rawPayload === 'object' ? rawPayload : {};
+    const rawJobType = String(payload.jobType || JOB_TYPE_UPLOAD)
+        .trim()
+        .toLowerCase();
+
+    if (rawJobType === JOB_TYPE_REORDER) {
+        return processGalleryReorderJob(payload);
+    }
+
+    return processUploadJob(payload);
 }

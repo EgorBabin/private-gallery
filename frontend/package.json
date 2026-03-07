@@ -13,6 +13,7 @@
     "format.fix": "prettier . --write"
   },
   "dependencies": {
+    "@dnd-kit/react": "^0.3.2",
     "lucide-react": "0.563.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",

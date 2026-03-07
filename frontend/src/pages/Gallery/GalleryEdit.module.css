@@ -224,6 +224,144 @@
   user-select: none;
 }
 
+.reorderSection {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--color-border);
+  display: grid;
+  gap: 10px;
+}
+
+.reorderHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.reorderHead h3 {
+  margin: 0;
+  font-size: 0.98rem;
+}
+
+.reorderActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.reorderHint {
+  margin: 0;
+  color: var(--accent-2);
+  font-size: 0.9rem;
+}
+
+.reorderStatus {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  font-size: 0.82rem;
+  line-height: 1.35;
+  background: var(--color-background-overlay-soft);
+  word-break: break-all;
+}
+
+.reorderStatus span {
+  opacity: 0.8;
+}
+
+.reorderEmpty {
+  min-height: 110px;
+  border: 1px dashed var(--color-border-strong);
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-secondary);
+  padding: 12px;
+  text-align: center;
+}
+
+.reorderGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
+  gap: 8px;
+}
+
+.reorderCard {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  background: var(--color-background-overlay-soft);
+  cursor: grab;
+  touch-action: manipulation;
+}
+
+.reorderCardDragging {
+  opacity: 0.78;
+  box-shadow: 0 0 0 2px var(--accent-1);
+}
+
+.reorderCard:active {
+  cursor: grabbing;
+}
+
+.reorderCardDisabled {
+  cursor: default;
+}
+
+.reorderHandle {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  background: var(--color-background-overlay-soft);
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border);
+  backdrop-filter: blur(3px);
+  pointer-events: none;
+}
+
+.reorderHandle span {
+  min-width: 16px;
+  text-align: center;
+}
+
+.reorderImage {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.reorderVideoBadge {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  border: 1px solid var(--color-border);
+  background: var(--color-background-overlay-soft);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2;
+  pointer-events: none;
+}
+
 @media (max-width: 1200px) {
   .table {
     min-width: 700px;
@@ -245,5 +383,9 @@
 
   .table {
     min-width: 640px;
+  }
+
+  .reorderGrid {
+    grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
   }
 }

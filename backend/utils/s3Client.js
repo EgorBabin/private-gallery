@@ -5,6 +5,7 @@ import {
     PutObjectCommand,
     HeadObjectCommand,
     DeleteObjectCommand,
+    CopyObjectCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl as awsGetSignedUrl } from '@aws-sdk/s3-request-presigner';
 import path from 'path';
@@ -76,6 +77,97 @@ export async function listPrefixes(prefix = '') {
         }
         throw e;
     }
+}
+
+function normalizeEtag(value) {
+    const etag = String(value || '').trim();
+    if (!etag) {
+        return null;
+    }
+    return etag.replace(/^"+|"+$/g, '') || null;
+}
+
+function normalizeMetaKey(key) {
+    return String(key || '')
+        .trim()
+        .replace(/^\/+/, '');
+}
+
+function toCopySource(key) {
+    const normalized = normalizeMetaKey(key);
+    return `${BUCKET}/${normalized
+        .split('/')
+        .map((part) => encodeURIComponent(part))
+        .join('/')}`;
+}
+
+export async function headObjectMeta(key, opts = {}) {
+    const { silentNotFound = false } = opts;
+    const normalizedKey = normalizeMetaKey(key);
+    if (!normalizedKey) {
+        const err = new Error('S3 key is required');
+        err.code = 'InvalidKey';
+        throw err;
+    }
+
+    try {
+        const data = await s3.send(
+            new HeadObjectCommand({
+                Bucket: BUCKET,
+                Key: normalizedKey,
+            }),
+        );
+        return {
+            key: normalizedKey,
+            etag: normalizeEtag(data?.ETag),
+            size: Number(data?.ContentLength) || 0,
+            contentType: data?.ContentType || null,
+            lastModified: data?.LastModified || null,
+        };
+    } catch (e) {
+        if (
+            e.Code === 'NotFound' ||
+            e.Code === 'NoSuchKey' ||
+            e.$metadata?.httpStatusCode === 404
+        ) {
+            if (!silentNotFound) {
+                console.error('HeadObject failed for', normalizedKey, {
+                    code: e.Code || e.name,
+                    status: e.$metadata?.httpStatusCode,
+                });
+            }
+            const err = new Error('S3: object not found');
+            err.code = 'NoSuchKey';
+            throw err;
+        }
+        if (e.Code === 'AccessDenied' || e.$metadata?.httpStatusCode === 403) {
+            const err = new Error('S3: access denied to object');
+            err.code = 'AccessDenied';
+            throw err;
+        }
+        throw e;
+    }
+}
+
+export async function copyObjectInS3(sourceKey, destinationKey) {
+    const source = normalizeMetaKey(sourceKey);
+    const destination = normalizeMetaKey(destinationKey);
+    if (!source || !destination) {
+        const err = new Error(
+            'Both sourceKey and destinationKey are required for copy',
+        );
+        err.code = 'InvalidCopyKey';
+        throw err;
+    }
+
+    await s3.send(
+        new CopyObjectCommand({
+            Bucket: BUCKET,
+            CopySource: toCopySource(source),
+            Key: destination,
+            MetadataDirective: 'COPY',
+        }),
+    );
 }
 
 export async function getSignedUrlForKey(key, expiresInSec = 300, opts = {}) {

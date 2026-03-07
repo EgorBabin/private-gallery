@@ -1,6 +1,19 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
+import { DragDropProvider } from '@dnd-kit/react';
+import { useSortable } from '@dnd-kit/react/sortable';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { CornerLeftUp, CornerRightDown } from 'lucide-react';
+import {
+  CornerLeftUp,
+  CornerRightDown,
+  GripVertical,
+  Play,
+} from 'lucide-react';
 import { sileo } from 'sileo';
 import { useCsrfFetch } from '@/hooks/useCsrfFetch';
 import { useCheckSession } from '@/hooks/useCheckSession';
@@ -9,8 +22,25 @@ import { notify, notifyError, notifyLoading } from '@/utils/notifications';
 import styles from './GalleryEdit.module.css';
 
 const CARDS_API = '/api/gallery/cards-admin';
+const PREVIEWS_API = '/api/gallery/previews';
+const REORDER_API = '/api/gallery/reorder';
+const REORDER_STATUS_API = '/api/gallery/reorder-status';
 const CATEGORY_RE = /^[A-Za-z]+$/;
 const CARD_PATH_RE = /^\d{1,4}\/[A-Za-z]+$/;
+const REORDER_POLL_DELAY_MS = 2000;
+const REORDER_POLL_ATTEMPTS = 180;
+const REORDER_STAGE_MESSAGES = {
+  queued: 'Задача поставлена в очередь',
+  starting: 'Подготавливаем переименование фотографий',
+  processing: 'Обрабатываем задачу',
+  'staging-temp': 'Перемещаем фотографии во временную область',
+  'writing-targets': 'Применяем новый порядок фотографий',
+  retrying: 'Повторяем шаг после проверки hash',
+  completed: 'Переименование завершено',
+  done: 'Переименование завершено',
+  failed: 'Не удалось завершить переименование',
+  error: 'Ошибка переименования фотографий',
+};
 
 function validationError(message) {
   const err = new Error(message);
@@ -37,6 +67,95 @@ function toEditForm(card) {
     sortOrder: String(card.sortOrder ?? 0),
     previewKey: String(card.previewKey ?? '').replace(/^preview\//, ''),
   };
+}
+
+function stripExt(value) {
+  const input = String(value || '');
+  return input.replace(/\.[^.]+$/, '');
+}
+
+function parseSortableIndexFromKey(key) {
+  const baseWithExt =
+    String(key || '')
+      .split('/')
+      .pop() || '';
+  const baseNoExt = stripExt(baseWithExt).replace(/^video_/, '');
+  const match = baseNoExt.match(/(\d+)$/);
+  if (!match) {
+    return Number.MAX_SAFE_INTEGER;
+  }
+  const parsed = Number(match[1]);
+  return Number.isFinite(parsed) ? parsed : Number.MAX_SAFE_INTEGER;
+}
+
+function moveArrayItem(items, fromIndex, toIndex) {
+  if (
+    !Array.isArray(items) ||
+    fromIndex < 0 ||
+    toIndex < 0 ||
+    fromIndex >= items.length ||
+    toIndex >= items.length
+  ) {
+    return items;
+  }
+
+  const copy = items.slice();
+  const [moved] = copy.splice(fromIndex, 1);
+  copy.splice(toIndex, 0, moved);
+  return copy;
+}
+
+function arraysEqual(a, b) {
+  if (a === b) return true;
+  if (!Array.isArray(a) || !Array.isArray(b)) return false;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i] !== b[i]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+function SortablePreviewCard({ item, index, disabled }) {
+  const { ref, isDragSource } = useSortable({
+    id: item.key,
+    index,
+    group: 'gallery-edit-order',
+    disabled,
+  });
+
+  return (
+    <div
+      ref={ref}
+      className={`${styles.reorderCard} ${isDragSource ? styles.reorderCardDragging : ''} ${disabled ? styles.reorderCardDisabled : ''}`}
+    >
+      <div className={styles.reorderHandle} aria-hidden="true">
+        <GripVertical size={18} />
+        <span>{index + 1}</span>
+      </div>
+
+      <img
+        src={item.url}
+        loading="lazy"
+        decoding="async"
+        alt={item.name || item.key || `photo-${index + 1}`}
+        className={styles.reorderImage}
+      />
+
+      {item.isVideo && (
+        <div className={styles.reorderVideoBadge} aria-hidden="true">
+          <Play size={16} />
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default function GalleryEdit() {
@@ -74,6 +193,11 @@ export default function GalleryEdit() {
   const [file, setFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState('');
   const [isVideo, setIsVideo] = useState(false);
+  const [galleryItems, setGalleryItems] = useState([]);
+  const [galleryLoading, setGalleryLoading] = useState(false);
+  const [savingReorder, setSavingReorder] = useState(false);
+  const [reorderBaseOrder, setReorderBaseOrder] = useState([]);
+  const reorderLastToastStageRef = useRef('');
 
   useEffect(() => {
     if (!file) {
@@ -377,6 +501,244 @@ export default function GalleryEdit() {
   };
 
   const canUpload = !rootMode && CARD_PATH_RE.test(targetPathFromUrl);
+  const currentOrderKeys = useMemo(
+    () => galleryItems.map((item) => item.key),
+    [galleryItems],
+  );
+  const reorderDirty = useMemo(
+    () => !arraysEqual(currentOrderKeys, reorderBaseOrder),
+    [currentOrderKeys, reorderBaseOrder],
+  );
+
+  const loadGalleryItems = useCallback(async () => {
+    if (!canUpload) {
+      setGalleryItems([]);
+      setReorderBaseOrder([]);
+      return;
+    }
+
+    setGalleryLoading(true);
+    try {
+      const prefix = `${targetPathFromUrl}/`;
+      const fetched = [];
+      let continuationToken = null;
+
+      do {
+        const params = new URLSearchParams({
+          prefix,
+          limit: '1000',
+        });
+        if (continuationToken) {
+          params.set('continuationToken', continuationToken);
+        }
+
+        const res = await fetch(`${PREVIEWS_API}?${params.toString()}`, {
+          credentials: 'include',
+        });
+
+        if (res.status === 401) {
+          nav('/login');
+          return;
+        }
+        if (!res.ok) {
+          throw new Error('Не удалось загрузить фотографии для сортировки');
+        }
+
+        const data = await res.json();
+        const batch = Array.isArray(data?.items) ? data.items : [];
+        fetched.push(...batch);
+        continuationToken =
+          data?.isTruncated && data?.nextContinuationToken
+            ? String(data.nextContinuationToken)
+            : null;
+      } while (continuationToken);
+
+      const deduped = Array.from(
+        new Map(
+          fetched
+            .filter((item) => item && typeof item.key === 'string')
+            .map((item) => [item.key, item]),
+        ).values(),
+      );
+
+      deduped.sort((a, b) => {
+        const ai = parseSortableIndexFromKey(a?.key || '');
+        const bi = parseSortableIndexFromKey(b?.key || '');
+        if (ai !== bi) {
+          return ai - bi;
+        }
+        return String(a?.key || '').localeCompare(String(b?.key || ''));
+      });
+
+      setGalleryItems(deduped);
+      setReorderBaseOrder(deduped.map((item) => item.key));
+      reorderLastToastStageRef.current = '';
+    } catch (err) {
+      notifyError(err, 'Не удалось загрузить фото для сортировки');
+    } finally {
+      setGalleryLoading(false);
+    }
+  }, [canUpload, nav, targetPathFromUrl]);
+
+  useEffect(() => {
+    loadGalleryItems();
+  }, [loadGalleryItems]);
+
+  const handleDragEnd = useCallback(
+    (event) => {
+      if (savingReorder) {
+        return;
+      }
+      const source = event?.operation?.source;
+      const target = event?.operation?.target;
+      const fromOp = Number.isInteger(source?.initialIndex)
+        ? source.initialIndex
+        : -1;
+      const toOp = Number.isInteger(source?.index) ? source.index : -1;
+      const sourceId = String(source?.id || '');
+      const targetId = String(target?.id || '');
+
+      setGalleryItems((prev) => {
+        const fromIndex =
+          fromOp >= 0 && fromOp < prev.length
+            ? fromOp
+            : prev.findIndex((item) => item.key === sourceId);
+        const toIndex =
+          toOp >= 0 && toOp < prev.length
+            ? toOp
+            : prev.findIndex((item) => item.key === targetId);
+        if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) {
+          return prev;
+        }
+        return moveArrayItem(prev, fromIndex, toIndex);
+      });
+    },
+    [savingReorder],
+  );
+
+  const pollReorderStatus = useCallback(
+    async (statusKey) => {
+      for (let attempt = 0; attempt < REORDER_POLL_ATTEMPTS; attempt += 1) {
+        const res = await fetch(
+          `${REORDER_STATUS_API}?statusKey=${encodeURIComponent(statusKey)}`,
+          {
+            credentials: 'include',
+          },
+        );
+        if (res.status === 401) {
+          nav('/login');
+          const err = new Error('Сессия истекла, выполните вход повторно');
+          err.status = 'warning';
+          throw err;
+        }
+
+        const { data } = await parseApiResponse(
+          res,
+          'Не удалось получить статус перестановки',
+        );
+        const job = data?.job || {};
+        const status = String(job.status || '')
+          .trim()
+          .toLowerCase();
+        const stage = String(job.stage || '').trim();
+        const stageKey = stage || status || 'processing';
+
+        if (stageKey && stageKey !== reorderLastToastStageRef.current) {
+          reorderLastToastStageRef.current = stageKey;
+          if (status !== 'done' && status !== 'success') {
+            notify({
+              status:
+                status === 'error' || status === 'failed' ? 'error' : 'info',
+              message:
+                REORDER_STAGE_MESSAGES[stageKey] ||
+                `Статус обработки: ${stageKey}`,
+            });
+          }
+        }
+
+        if (status === 'done' || status === 'success') {
+          return job;
+        }
+        if (status === 'error' || status === 'failed') {
+          const err = new Error(
+            String(job.error || '').trim() ||
+              'Ошибка обработки перестановки фотографий',
+          );
+          err.status = 'error';
+          throw err;
+        }
+
+        await sleep(REORDER_POLL_DELAY_MS);
+      }
+
+      const timeoutErr = new Error(
+        'Задача ещё выполняется. Обновите страницу через минуту для проверки.',
+      );
+      timeoutErr.status = 'info';
+      throw timeoutErr;
+    },
+    [nav],
+  );
+
+  const handleSaveReorder = async () => {
+    if (!canUpload || galleryItems.length === 0) {
+      notify({
+        status: 'warning',
+        message: 'Нет фотографий для сортировки',
+      });
+      return;
+    }
+    if (!reorderDirty) {
+      notify({
+        status: 'info',
+        message: 'Порядок не изменился',
+      });
+      return;
+    }
+
+    const loadingToastId = notifyLoading(
+      'Сохраняем порядок и запускаем проверку hash...',
+    );
+    setSavingReorder(true);
+    reorderLastToastStageRef.current = '';
+
+    try {
+      const res = await csrfFetch(REORDER_API, {
+        method: 'POST',
+        body: JSON.stringify({
+          path: targetPathFromUrl,
+          order: currentOrderKeys,
+        }),
+      });
+      const { data, message, status } = await parseApiResponse(
+        res,
+        'Не удалось отправить порядок фотографий',
+      );
+
+      notify({
+        status,
+        message:
+          message ||
+          'Задача поставлена в очередь. Ожидаем завершение переименования.',
+      });
+
+      const statusKey = String(data?.statusKey || '').trim();
+      if (statusKey) {
+        await pollReorderStatus(statusKey);
+        notify({
+          status: 'success',
+          message: 'Порядок фотографий сохранён и подтверждён по hash',
+        });
+      }
+
+      await loadGalleryItems();
+    } catch (err) {
+      notifyError(err, 'Не удалось сохранить порядок фотографий');
+    } finally {
+      setSavingReorder(false);
+      sileo.dismiss(loadingToastId);
+    }
+  };
 
   const handleUpload = async () => {
     if (!canUpload) {
@@ -426,6 +788,7 @@ export default function GalleryEdit() {
       });
       setFile(null);
       setIsVideo(false);
+      void loadGalleryItems();
     } catch (err) {
       notifyError(err, 'Ошибка загрузки');
     } finally {
@@ -693,6 +1056,60 @@ export default function GalleryEdit() {
           <button type="button" onClick={handleUpload}>
             Загрузить
           </button>
+
+          <div className={styles.reorderSection}>
+            <div className={styles.reorderHead}>
+              <h3>Порядок фотографий</h3>
+              <div className={styles.reorderActions}>
+                <button
+                  type="button"
+                  onClick={loadGalleryItems}
+                  disabled={galleryLoading || savingReorder}
+                >
+                  Обновить
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveReorder}
+                  disabled={
+                    galleryLoading ||
+                    savingReorder ||
+                    galleryItems.length === 0 ||
+                    !reorderDirty
+                  }
+                >
+                  {savingReorder ? 'Сохраняем...' : 'Сохранить порядок'}
+                </button>
+              </div>
+            </div>
+
+            {reorderDirty && !savingReorder && (
+              <p className={styles.reorderHint}>
+                Есть несохранённые изменения порядка
+              </p>
+            )}
+
+            {galleryLoading ? (
+              <div className={styles.reorderEmpty}>Загружаем фотографии...</div>
+            ) : galleryItems.length === 0 ? (
+              <div className={styles.reorderEmpty}>
+                Пока нет фото для перетаскивания
+              </div>
+            ) : (
+              <DragDropProvider onDragEnd={handleDragEnd}>
+                <div className={styles.reorderGrid}>
+                  {galleryItems.map((item, index) => (
+                    <SortablePreviewCard
+                      key={item.key}
+                      item={item}
+                      index={index}
+                      disabled={savingReorder}
+                    />
+                  ))}
+                </div>
+              </DragDropProvider>
+            )}
+          </div>
         </section>
       )}
     </div>

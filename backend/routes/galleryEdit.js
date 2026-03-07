@@ -6,6 +6,8 @@ import {
     uploadToS3,
     listObjects,
     getSignedUrlForKey,
+    getObjectBufferFromS3,
+    headObjectMeta,
 } from '../utils/s3Client.js';
 import {
     listCards,
@@ -64,8 +66,12 @@ sharp.cache(false);
 const PREVIEW_ROOT = 'preview/';
 const ORIGINAL_ROOT = 'original_photo/';
 const SCREEN_DIRS = ['screen-1280', 'screen-1920', 'screen-2560'];
+const VIDEO_DIRS = ['video_1440', 'video_1080', 'video_720'];
 const PROCESSING_SOURCE_ROOT = 'processing/source/';
+const REORDER_STATUS_ROOT = 'processing/reorder/';
 const CARDS_S3_CONCURRENCY = 4;
+const REORDER_S3_CONCURRENCY = 8;
+const MEDIA_FILE_RE = /\.(jpe?g|png|webp|avif|gif|mp4|tiff?)$/i;
 
 function makeNumericName(req) {
     const now = BigInt(Date.now());
@@ -104,6 +110,164 @@ async function mapWithConcurrency(items, limit, mapper) {
     const workers = Array.from({ length: workersCount }, () => worker());
     await Promise.all(workers);
     return results;
+}
+
+function normalizeEtag(value) {
+    const normalized = String(value || '')
+        .trim()
+        .replace(/^"+|"+$/g, '');
+    return normalized || null;
+}
+
+function sanitizeS3Key(value) {
+    return String(value || '')
+        .trim()
+        .replace(/^\/+/, '')
+        .replace(/\.\./g, '');
+}
+
+function stripExt(name) {
+    const ext = path.posix.extname(name);
+    return ext ? name.slice(0, -ext.length) : name;
+}
+
+function parseSortableIndexFromKey(key) {
+    const baseWithExt = path.posix.basename(String(key || ''));
+    const baseNoExt = stripExt(baseWithExt).replace(/^video_/, '');
+    const match = baseNoExt.match(/(\d+)$/);
+    if (!match) {
+        return Number.MAX_SAFE_INTEGER;
+    }
+    const parsed = Number(match[1]);
+    return Number.isFinite(parsed) ? parsed : Number.MAX_SAFE_INTEGER;
+}
+
+function comparePreviewObjects(a, b) {
+    const ai = parseSortableIndexFromKey(a?.Key || '');
+    const bi = parseSortableIndexFromKey(b?.Key || '');
+    if (ai !== bi) {
+        return ai - bi;
+    }
+    return String(a?.Key || '').localeCompare(String(b?.Key || ''));
+}
+
+function isFileObject(obj, prefix) {
+    const key = String(obj?.Key || '');
+    if (!key || key.endsWith('/')) {
+        return false;
+    }
+    const cleanPrefix = String(prefix || '').replace(/\/+$/, '');
+    if (key === cleanPrefix || key === `${cleanPrefix}/`) {
+        return false;
+    }
+    return MEDIA_FILE_RE.test(key);
+}
+
+async function listAllObjectsForPrefix(prefix) {
+    const output = [];
+    let continuationToken = null;
+
+    do {
+        const page = await listObjects(prefix, 1000, continuationToken);
+        output.push(...(page.Contents || []));
+        continuationToken = page.IsTruncated
+            ? page.NextContinuationToken || null
+            : null;
+    } while (continuationToken);
+
+    return output;
+}
+
+function extractVariantFromKey(key, folderPath) {
+    const cleanKey = sanitizeS3Key(key);
+    const roots = [
+        { type: 'preview', prefix: `${PREVIEW_ROOT}${folderPath}/` },
+        ...SCREEN_DIRS.map((dir) => ({
+            type: dir,
+            prefix: `${dir}/${folderPath}/`,
+        })),
+        { type: 'original', prefix: `${ORIGINAL_ROOT}${folderPath}/` },
+        ...VIDEO_DIRS.map((dir) => ({
+            type: dir,
+            prefix: `${dir}/${folderPath}/`,
+        })),
+    ];
+
+    for (const root of roots) {
+        if (!cleanKey.startsWith(root.prefix)) {
+            continue;
+        }
+        const relative = cleanKey.slice(root.prefix.length);
+        if (
+            !relative ||
+            relative.includes('/') ||
+            relative === '.placeholder'
+        ) {
+            return null;
+        }
+        const ext = path.posix.extname(relative);
+        if (!ext) {
+            return null;
+        }
+        const rawBase = stripExt(relative);
+        const groupBase =
+            root.type.startsWith('video_') && !rawBase.startsWith('video_')
+                ? `video_${rawBase}`
+                : rawBase;
+        return {
+            type: root.type,
+            key: cleanKey,
+            ext,
+            groupBase,
+        };
+    }
+
+    return null;
+}
+
+function buildTargetKeyForVariant(variant, folderPath, targetBase) {
+    const ext = String(variant.ext || '').toLowerCase() || '.webp';
+    if (variant.type === 'preview') {
+        return `${PREVIEW_ROOT}${folderPath}/${targetBase}${ext}`;
+    }
+    if (variant.type === 'original') {
+        return `${ORIGINAL_ROOT}${folderPath}/${targetBase}${ext}`;
+    }
+    if (SCREEN_DIRS.includes(variant.type)) {
+        return `${variant.type}/${folderPath}/${targetBase}${ext}`;
+    }
+    if (VIDEO_DIRS.includes(variant.type)) {
+        const bareBase = targetBase.replace(/^video_/, '');
+        return `${variant.type}/${folderPath}/${bareBase}${ext}`;
+    }
+    throw new Error(`Unknown variant type: ${variant.type}`);
+}
+
+function parsePreviewBaseFromKey(key, folderPath) {
+    const clean = sanitizeS3Key(key);
+    const prefix = `${PREVIEW_ROOT}${folderPath}/`;
+    if (!clean.startsWith(prefix)) {
+        return null;
+    }
+    const relative = clean.slice(prefix.length);
+    if (!relative || relative.includes('/')) {
+        return null;
+    }
+    return stripExt(relative);
+}
+
+function makeReorderJobId() {
+    return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function parseOrderKeyEntry(entry) {
+    if (typeof entry === 'string') {
+        return sanitizeS3Key(entry);
+    }
+    if (entry && typeof entry === 'object' && typeof entry.key === 'string') {
+        return sanitizeS3Key(entry.key);
+    }
+    return '';
 }
 
 function toCardResponse(card, extra = {}) {
@@ -513,6 +677,342 @@ router.post('/upload', upload.single('image'), async (req, res) => {
                 #galleryEdit.js #upload #error`,
             );
         }
+    }
+});
+
+router.post('/reorder', async (req, res) => {
+    let statusKey = null;
+    try {
+        const body = req.body || {};
+        const parsedFolderPath = parseCardPath(body.path || body.prefix || '');
+        if (!parsedFolderPath) {
+            return sendError(res, {
+                httpStatus: 400,
+                status: 'warning',
+                message:
+                    'Некорректный path. Используйте формат "year/category"',
+            });
+        }
+
+        const folderPath = parsedFolderPath.path;
+        const rawOrder = Array.isArray(body.order) ? body.order : [];
+        if (rawOrder.length === 0) {
+            return sendError(res, {
+                httpStatus: 400,
+                status: 'warning',
+                message: 'Передайте порядок фотографий в поле order[]',
+            });
+        }
+
+        const requestedOrder = rawOrder.map(parseOrderKeyEntry);
+        if (requestedOrder.some((key) => !key)) {
+            return sendError(res, {
+                httpStatus: 400,
+                status: 'warning',
+                message: 'Некорректные ключи в order[]',
+            });
+        }
+
+        const requestedOrderSet = new Set(requestedOrder);
+        if (requestedOrderSet.size !== requestedOrder.length) {
+            return sendError(res, {
+                httpStatus: 400,
+                status: 'warning',
+                message: 'В order[] есть дубли',
+            });
+        }
+
+        await ensureCardExists(folderPath);
+
+        const previewPrefix = `${PREVIEW_ROOT}${folderPath}/`;
+        const previewObjects = (
+            await listAllObjectsForPrefix(previewPrefix)
+        ).filter((obj) => isFileObject(obj, previewPrefix));
+        if (previewObjects.length === 0) {
+            return sendError(res, {
+                httpStatus: 404,
+                status: 'warning',
+                message: 'В папке нет фотографий для сортировки',
+            });
+        }
+
+        previewObjects.sort(comparePreviewObjects);
+        const existingPreviewKeys = previewObjects.map((obj) =>
+            sanitizeS3Key(obj.Key),
+        );
+        const existingPreviewSet = new Set(existingPreviewKeys);
+
+        if (requestedOrder.length !== existingPreviewKeys.length) {
+            return sendError(res, {
+                httpStatus: 409,
+                status: 'warning',
+                message:
+                    'Порядок не совпадает с текущим составом галереи. Обновите страницу и попробуйте снова.',
+            });
+        }
+
+        const expectedPreviewPrefix = `${PREVIEW_ROOT}${folderPath}/`;
+        for (const key of requestedOrder) {
+            if (!key.startsWith(expectedPreviewPrefix)) {
+                return sendError(res, {
+                    httpStatus: 400,
+                    status: 'warning',
+                    message: 'order[] содержит ключи из другой папки',
+                });
+            }
+            if (!existingPreviewSet.has(key)) {
+                return sendError(res, {
+                    httpStatus: 409,
+                    status: 'warning',
+                    message:
+                        'Список фотографий устарел. Обновите страницу и повторите действие.',
+                });
+            }
+        }
+
+        const otherPrefixes = [
+            ...SCREEN_DIRS.map((dir) => `${dir}/${folderPath}/`),
+            `${ORIGINAL_ROOT}${folderPath}/`,
+            ...VIDEO_DIRS.map((dir) => `${dir}/${folderPath}/`),
+        ];
+
+        const otherLists = await Promise.all(
+            otherPrefixes.map(async (prefix) => {
+                const listed = await listAllObjectsForPrefix(prefix);
+                return listed.filter((obj) => isFileObject(obj, prefix));
+            }),
+        );
+
+        const allVariantObjects = [
+            ...previewObjects,
+            ...otherLists.flat(),
+        ].filter(Boolean);
+
+        const preparedVariants = await mapWithConcurrency(
+            allVariantObjects,
+            REORDER_S3_CONCURRENCY,
+            async (obj) => {
+                const variant = extractVariantFromKey(obj?.Key, folderPath);
+                if (!variant) {
+                    return null;
+                }
+
+                let hash = normalizeEtag(obj?.ETag);
+                let size = Number(obj?.Size) || 0;
+                if (!hash) {
+                    const meta = await headObjectMeta(variant.key, {
+                        silentNotFound: true,
+                    });
+                    hash = normalizeEtag(meta?.etag);
+                    size = Number(meta?.size) || size;
+                }
+                if (!hash) {
+                    throw new Error(
+                        `Не удалось получить hash для объекта ${variant.key}`,
+                    );
+                }
+
+                return {
+                    ...variant,
+                    hash,
+                    size,
+                };
+            },
+        );
+
+        const variantsByBase = new Map();
+        const seenVariantKeys = new Set();
+        for (const entry of preparedVariants) {
+            if (!entry) {
+                continue;
+            }
+            if (seenVariantKeys.has(entry.key)) {
+                continue;
+            }
+            seenVariantKeys.add(entry.key);
+            const list = variantsByBase.get(entry.groupBase) || [];
+            list.push(entry);
+            variantsByBase.set(entry.groupBase, list);
+        }
+
+        const moves = [];
+        for (let idx = 0; idx < requestedOrder.length; idx += 1) {
+            const sourcePreviewKey = requestedOrder[idx];
+            const sourceBase = parsePreviewBaseFromKey(
+                sourcePreviewKey,
+                folderPath,
+            );
+            if (!sourceBase) {
+                return sendError(res, {
+                    httpStatus: 400,
+                    status: 'warning',
+                    message: `Некорректный preview key: ${sourcePreviewKey}`,
+                });
+            }
+
+            const sourceVariants = variantsByBase.get(sourceBase) || [];
+            if (sourceVariants.length === 0) {
+                return sendError(res, {
+                    httpStatus: 409,
+                    status: 'warning',
+                    message:
+                        'Не удалось собрать копии файлов для сортировки. Обновите страницу и попробуйте снова.',
+                });
+            }
+
+            const targetIndex = idx + 1;
+            const targetBase = sourceBase.startsWith('video_')
+                ? `video_${targetIndex}`
+                : String(targetIndex);
+
+            for (const variant of sourceVariants) {
+                const targetKey = sanitizeS3Key(
+                    buildTargetKeyForVariant(variant, folderPath, targetBase),
+                );
+
+                moves.push({
+                    sourceKey: variant.key,
+                    targetKey,
+                    hash: variant.hash,
+                    size: variant.size,
+                });
+            }
+        }
+
+        if (moves.length === 0) {
+            return sendError(res, {
+                httpStatus: 400,
+                status: 'warning',
+                message: 'Не найдено файлов для переименования',
+            });
+        }
+
+        const jobId = makeReorderJobId();
+        const queuedAt = new Date().toISOString();
+        statusKey = `${REORDER_STATUS_ROOT}${folderPath}/${jobId}.json`;
+
+        await uploadToS3(
+            Buffer.from(
+                JSON.stringify({
+                    status: 'queued',
+                    stage: 'queued',
+                    queuedAt,
+                    jobId,
+                    folderPath,
+                    totalItems: requestedOrder.length,
+                    totalMoves: moves.length,
+                }),
+            ),
+            statusKey,
+            'application/json',
+        );
+
+        await publishPhotoJob({
+            jobType: 'gallery-reorder',
+            jobId,
+            folderPath,
+            statusKey,
+            queuedAt,
+            totalItems: requestedOrder.length,
+            moves,
+        });
+
+        sendSuccess(res, {
+            httpStatus: 202,
+            status: 'accepted',
+            message:
+                'Перестановка принята в обработку. Идёт переименование и проверка hash.',
+            payload: {
+                statusKey,
+                jobId,
+                totalItems: requestedOrder.length,
+                totalMoves: moves.length,
+            },
+        });
+        logAction(
+            req,
+            'accepted gallery reorder',
+            `${folderPath}
+            #galleryEdit.js #reorder`,
+        );
+    } catch (err) {
+        console.error('reorder route error', err);
+        if (statusKey) {
+            try {
+                await uploadToS3(
+                    Buffer.from(
+                        JSON.stringify({
+                            status: 'error',
+                            stage: 'failed-to-queue',
+                            error: String(err),
+                            at: new Date().toISOString(),
+                        }),
+                    ),
+                    statusKey,
+                    'application/json',
+                );
+            } catch (statusErr) {
+                console.error(
+                    'Failed to write reorder queue error status',
+                    statusErr,
+                );
+            }
+        }
+
+        if (!res.headersSent) {
+            sendError(res, {
+                httpStatus: 500,
+                message: 'Не удалось запустить перестановку фотографий',
+            });
+        }
+    }
+});
+
+router.get('/reorder-status', async (req, res) => {
+    try {
+        const statusKey = sanitizeS3Key(req.query.statusKey || '');
+        if (
+            !statusKey ||
+            !statusKey.startsWith(REORDER_STATUS_ROOT) ||
+            !statusKey.endsWith('.json')
+        ) {
+            return sendError(res, {
+                httpStatus: 400,
+                status: 'warning',
+                message: 'Некорректный statusKey',
+            });
+        }
+
+        let payload = {};
+        try {
+            const raw = await getObjectBufferFromS3(statusKey);
+            if (raw.length > 0) {
+                payload = JSON.parse(raw.toString('utf8'));
+            }
+        } catch (err) {
+            if (err?.code === 'NoSuchKey') {
+                return sendError(res, {
+                    httpStatus: 404,
+                    status: 'warning',
+                    message: 'Статус задачи не найден',
+                });
+            }
+            throw err;
+        }
+
+        sendSuccess(res, {
+            message: 'Статус задачи загружен',
+            payload: {
+                statusKey,
+                job: payload,
+            },
+        });
+    } catch (err) {
+        console.error('reorder-status route error', err);
+        sendError(res, {
+            httpStatus: 500,
+            message: 'Не удалось получить статус задачи',
+        });
     }
 });
 
