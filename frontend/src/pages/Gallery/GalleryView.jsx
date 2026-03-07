@@ -1,6 +1,7 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Play } from 'lucide-react';
+import Masonry, { ResponsiveMasonry } from 'react-responsive-masonry';
 import { useCheckSession } from '@/hooks/useCheckSession';
 import Lightbox from '@/components/Lightbox/Lightbox';
 import { useTitle } from '@/hooks/useTitle';
@@ -9,6 +10,17 @@ import styles from './GalleryView.module.css';
 const API = '/api/gallery';
 const LS_KEY = 'gallery_items_cache';
 const CARDS_LS_KEY = 'gallery_cards_cache';
+const MASONRY_BREAKPOINTS = {
+  0: 2,
+  760: 3,
+  980: 4,
+  1200: 5,
+};
+const MASONRY_GUTTER_BREAKPOINTS = {
+  0: '3px',
+  760: '5px',
+  980: '7px',
+};
 
 export default function GalleryView() {
   const { year, category } = useParams();
@@ -20,11 +32,8 @@ export default function GalleryView() {
 
   const [originalUrls, setOriginalUrls] = useState([]);
   const [originalMetas, setOriginalMetas] = useState([]);
-  const [gridCols, setGridCols] = useState(0);
   const [cardTitle, setCardTitle] = useState('');
 
-  const scrollRef = useRef(null);
-  const gridRef = useRef(null);
   useTitle(cardTitle ? `${year} ${cardTitle}` : `${year} ${category}`);
 
   const { authenticated, loading: sessionLoading } = useCheckSession();
@@ -247,51 +256,6 @@ export default function GalleryView() {
     };
   }, [prefix, prefixKey]);
 
-  useEffect(() => {
-    const gridEl = gridRef.current;
-    if (!gridEl) return undefined;
-
-    const detectColumns = () => {
-      const nodes = gridEl.querySelectorAll(`.${styles.item}`);
-      if (!nodes.length) {
-        setGridCols(0);
-        return;
-      }
-
-      const firstTop = nodes[0].offsetTop;
-      let cols = 0;
-      for (const node of nodes) {
-        if (node.offsetTop !== firstTop) break;
-        cols += 1;
-      }
-      setGridCols((prev) => (prev === cols ? prev : cols));
-    };
-
-    detectColumns();
-
-    if (typeof ResizeObserver === 'undefined') {
-      window.addEventListener('resize', detectColumns);
-      return () => window.removeEventListener('resize', detectColumns);
-    }
-
-    const ro = new ResizeObserver(() => {
-      requestAnimationFrame(detectColumns);
-    });
-    ro.observe(gridEl);
-
-    return () => ro.disconnect();
-  }, [items.length]);
-
-  const gridClassName = [
-    styles.grid,
-    gridCols === 2 ? styles.cols2 : '',
-    gridCols === 3 ? styles.cols3 : '',
-    gridCols === 4 ? styles.cols4 : '',
-    gridCols >= 5 ? styles.cols5 : '',
-  ]
-    .filter(Boolean)
-    .join(' ');
-
   const open = useCallback(
     async (index) => {
       if (index < 0 || index >= items.length) return;
@@ -397,55 +361,63 @@ export default function GalleryView() {
         )}
       </h1>
 
-      <div className={styles.gridWrap} ref={scrollRef}>
-        {items.length === 0 ? (
-          <div className={gridClassName} ref={gridRef}>
-            {Array.from({ length: 12 }).map((_, i) => (
-              <div
-                key={`skeleton-${i}`}
-                className={`${styles.item} ${styles.skeleton}`}
-                aria-hidden="true"
-              >
-                <div className={styles.skeletonPhoto} />
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className={gridClassName} ref={gridRef}>
-            {items.map((it, idx) => {
-              const key = it.key ?? `${prefix}${idx}`;
-              const isVideo = !!it.isVideo;
-              return (
-                <div
-                  key={key}
-                  className={styles.item}
-                  onClick={() => open(idx)}
-                  role="button"
-                  tabIndex={0}
-                  aria-label={isVideo ? 'Открыть видео' : 'Открыть изображение'}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') open(idx);
-                  }}
-                >
-                  <img
-                    src={it.url}
-                    loading="lazy"
-                    decoding="async"
-                    alt={it.name ?? it.key ?? `${prefix}${idx}`}
-                    className={styles.img}
-                  />
-                  {isVideo && (
-                    <div className={styles.playOverlay} aria-hidden="true">
-                      <div className={styles.playBadge}>
-                        <Play className={styles.playIcon} />
-                      </div>
+      <div className={styles.gridWrap}>
+        <div className={styles.grid}>
+          <ResponsiveMasonry
+            columnsCountBreakPoints={MASONRY_BREAKPOINTS}
+            gutterBreakPoints={MASONRY_GUTTER_BREAKPOINTS}
+          >
+            <Masonry>
+              {items.length === 0
+                ? Array.from({ length: 12 }).map((_, i) => (
+                    <div
+                      key={`skeleton-${i}`}
+                      className={`${styles.item} ${styles.skeleton}`}
+                      aria-hidden="true"
+                    >
+                      <div className={styles.skeletonPhoto} />
                     </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
+                  ))
+                : items.map((it, idx) => {
+                    const key = it.key ?? `${prefix}${idx}`;
+                    const isVideo = !!it.isVideo;
+                    return (
+                      <div
+                        key={key}
+                        className={styles.item}
+                        onClick={() => open(idx)}
+                        role="button"
+                        tabIndex={0}
+                        aria-label={
+                          isVideo ? 'Открыть видео' : 'Открыть изображение'
+                        }
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') open(idx);
+                        }}
+                      >
+                        <img
+                          src={it.url}
+                          loading="lazy"
+                          decoding="async"
+                          alt={it.name ?? it.key ?? `${prefix}${idx}`}
+                          className={styles.img}
+                        />
+                        {isVideo && (
+                          <div
+                            className={styles.playOverlay}
+                            aria-hidden="true"
+                          >
+                            <div className={styles.playBadge}>
+                              <Play className={styles.playIcon} />
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+            </Masonry>
+          </ResponsiveMasonry>
+        </div>
       </div>
 
       {openIndex >= 0 && (
