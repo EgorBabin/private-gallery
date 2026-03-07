@@ -1,4 +1,5 @@
 import { listObjects } from './s3Client.js';
+import path from 'path';
 import {
     getCardByPath,
     createCard,
@@ -7,6 +8,7 @@ import {
     updateCardImageCount,
     updateCardPreviewKey,
 } from './cardsStore.js';
+import { parseSoftDeleteBase } from './deletionMarker.js';
 
 const PREVIEW_ROOT = 'preview/';
 const IMAGE_FILE_RE = /\.(jpe?g|png|webp|avif|gif)$/i;
@@ -18,7 +20,14 @@ function isImageKey(key, prefixNoSlash, prefixWithSlash) {
     if (key === prefixNoSlash || key === prefixWithSlash || key.endsWith('/')) {
         return false;
     }
-    return IMAGE_FILE_RE.test(key);
+    if (!IMAGE_FILE_RE.test(key)) {
+        return false;
+    }
+
+    const baseWithExt = path.posix.basename(String(key));
+    const ext = path.posix.extname(baseWithExt);
+    const baseNoExt = ext ? baseWithExt.slice(0, -ext.length) : baseWithExt;
+    return !parseSoftDeleteBase(baseNoExt);
 }
 
 export function normalizePreviewInput(rawPreviewKey) {

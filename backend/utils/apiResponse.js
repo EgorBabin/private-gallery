@@ -4,12 +4,7 @@ function buildPayload(base, extra = {}) {
 
 export function sendSuccess(
     res,
-    {
-        httpStatus = 200,
-        status = 'success',
-        message = 'OK',
-        payload = {},
-    } = {},
+    { httpStatus = 200, status = 'success', message = 'OK', payload = {} } = {},
 ) {
     return res
         .status(httpStatus)

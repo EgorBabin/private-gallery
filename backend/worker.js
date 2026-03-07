@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import { createPhotoConsumerChannel } from './utils/rabbitmq.js';
 import { processPhotoJob } from './workers/photoJobProcessor.js';
+import { startSoftDeleteSweeper } from './workers/softDeleteSweeper.js';
 
 const PREFETCH_DEFAULT = 1;
 const rawPrefetch = Number(
@@ -23,6 +24,7 @@ const retryDelayMs =
 let isShuttingDown = false;
 let activeConnection = null;
 let activeChannel = null;
+let stopSoftDeleteSweeper = null;
 
 function sleep(ms) {
     return new Promise((resolve) => {
@@ -102,7 +104,16 @@ async function runConsumeSession() {
                     }
 
                     try {
-                        await processPhotoJob(payload);
+                        const result = await processPhotoJob(payload);
+                        const jobType = String(
+                            payload?.jobType || 'photo-upload',
+                        );
+                        if (jobType !== 'photo-upload') {
+                            console.log('[photo-worker] Job completed', {
+                                jobType,
+                                result,
+                            });
+                        }
                         channel.ack(message);
                     } catch (err) {
                         console.error(
@@ -132,6 +143,16 @@ async function gracefulShutdown(signal) {
     }
     isShuttingDown = true;
     console.log(`[photo-worker] Received ${signal}, shutting down...`);
+    if (stopSoftDeleteSweeper) {
+        try {
+            await stopSoftDeleteSweeper();
+        } catch (err) {
+            console.error(
+                '[photo-worker] Failed to stop soft-delete sweeper:',
+                err,
+            );
+        }
+    }
     await closeActiveResources();
     process.exit(0);
 }
@@ -144,6 +165,8 @@ process.on('SIGTERM', () => {
 });
 
 async function main() {
+    stopSoftDeleteSweeper = startSoftDeleteSweeper();
+
     while (!isShuttingDown) {
         try {
             await runConsumeSession();

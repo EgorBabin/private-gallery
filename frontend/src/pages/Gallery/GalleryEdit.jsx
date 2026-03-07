@@ -11,8 +11,11 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import {
   CornerLeftUp,
   CornerRightDown,
+  Clock3,
   GripVertical,
   Play,
+  Trash2,
+  Undo2,
 } from 'lucide-react';
 import { sileo } from 'sileo';
 import { useCsrfFetch } from '@/hooks/useCsrfFetch';
@@ -25,6 +28,8 @@ const CARDS_API = '/api/gallery/cards-admin';
 const PREVIEWS_API = '/api/gallery/previews';
 const REORDER_API = '/api/gallery/reorder';
 const REORDER_STATUS_API = '/api/gallery/reorder-status';
+const MEDIA_SOFT_DELETE_API = '/api/gallery/media-soft-delete';
+const PENDING_DELETIONS_API = '/api/gallery/pending-deletions';
 const CATEGORY_RE = /^[A-Za-z]+$/;
 const CARD_PATH_RE = /^\d{1,4}\/[A-Za-z]+$/;
 const REORDER_POLL_DELAY_MS = 2000;
@@ -79,7 +84,9 @@ function parseSortableIndexFromKey(key) {
     String(key || '')
       .split('/')
       .pop() || '';
-  const baseNoExt = stripExt(baseWithExt).replace(/^video_/, '');
+  const baseNoExt = stripExt(baseWithExt)
+    .replace(/^delete_(.+)__(?:deleteAt|deleteCreated)_\d{8}$/, '$1')
+    .replace(/^video_/, '');
   const match = baseNoExt.match(/(\d+)$/);
   if (!match) {
     return Number.MAX_SAFE_INTEGER;
@@ -123,30 +130,91 @@ function sleep(ms) {
   });
 }
 
-function SortablePreviewCard({ item, index, disabled }) {
+function formatDeleteDaysLeft(daysLeft) {
+  const days = Number(daysLeft);
+  if (!Number.isFinite(days)) {
+    return 'Удаление по расписанию';
+  }
+  if (days <= 0) {
+    return '0';
+  }
+  return `${days}`;
+}
+
+function formatDeleteDueDate(value) {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) {
+    return 'неизвестно';
+  }
+  return date.toLocaleString('ru-RU', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+}
+
+function SortablePreviewCard({
+  item,
+  index,
+  disabled,
+  group = 'gallery-edit-order',
+  onDelete,
+  onRestore,
+  actionBusy,
+}) {
+  const pendingDeletion = Boolean(item?.isPendingDeletion);
   const { ref, isDragSource } = useSortable({
     id: item.key,
     index,
-    group: 'gallery-edit-order',
-    disabled,
+    group,
+    disabled: disabled || pendingDeletion,
   });
 
   return (
     <div
       ref={ref}
-      className={`${styles.reorderCard} ${isDragSource ? styles.reorderCardDragging : ''} ${disabled ? styles.reorderCardDisabled : ''}`}
+      className={`${styles.reorderCard} ${isDragSource ? styles.reorderCardDragging : ''} ${disabled ? styles.reorderCardDisabled : ''} ${pendingDeletion ? styles.reorderCardPendingDelete : ''}`}
     >
-      <div className={styles.reorderHandle} aria-hidden="true">
-        <GripVertical size={18} />
-        <span>{index + 1}</span>
-      </div>
+      {pendingDeletion ? (
+        <div className={styles.reorderDeleteBadge} aria-hidden="true">
+          <Clock3 size={14} />
+          <span>{formatDeleteDaysLeft(item.deleteDaysLeft)}</span>
+        </div>
+      ) : (
+        <div className={styles.reorderHandle} aria-hidden="true">
+          <GripVertical size={18} />
+          <span>{index + 1}</span>
+        </div>
+      )}
+
+      <button
+        type="button"
+        className={`${styles.reorderActionButton} ${pendingDeletion ? styles.reorderActionRestore : styles.reorderActionDelete}`}
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          if (pendingDeletion) {
+            onRestore?.(item);
+          } else {
+            onDelete?.(item);
+          }
+        }}
+        disabled={disabled || actionBusy}
+        title={
+          pendingDeletion
+            ? 'Отменить удаление изображения'
+            : 'Удалить изображение'
+        }
+      >
+        {pendingDeletion ? <Undo2 size={18} /> : <Trash2 size={16} />}
+      </button>
 
       <img
         src={item.url}
         loading="lazy"
         decoding="async"
         alt={item.name || item.key || `photo-${index + 1}`}
-        className={styles.reorderImage}
+        className={`${styles.reorderImage} ${pendingDeletion ? styles.reorderImagePendingDelete : ''}`}
       />
 
       {item.isVideo && (
@@ -154,6 +222,39 @@ function SortablePreviewCard({ item, index, disabled }) {
           <Play size={16} />
         </div>
       )}
+    </div>
+  );
+}
+
+function RootPendingDeleteCard({ item, onOpenFolder }) {
+  return (
+    <div className={styles.rootPendingCard}>
+      <img
+        src={item.url}
+        loading="lazy"
+        decoding="async"
+        alt={item.name || item.key || 'delete-pending'}
+        className={styles.rootPendingImage}
+      />
+      <div className={styles.rootPendingMeta}>
+        <p>
+          Папка: <strong>{item.folderPath}</strong>
+        </p>
+        <p>
+          Удалится: <strong>{formatDeleteDueDate(item.deleteDueAt)}</strong>
+        </p>
+        <p>
+          Осталось дней:{' '}
+          <strong>{formatDeleteDaysLeft(item.deleteDaysLeft)}</strong>
+        </p>
+      </div>
+      <button
+        type="button"
+        onClick={() => onOpenFolder(item.folderPath)}
+        className={styles.rootPendingOpenButton}
+      >
+        Перейти в папку
+      </button>
     </div>
   );
 }
@@ -194,8 +295,15 @@ export default function GalleryEdit() {
   const [previewUrl, setPreviewUrl] = useState('');
   const [isVideo, setIsVideo] = useState(false);
   const [galleryItems, setGalleryItems] = useState([]);
+  const [galleryPendingDeleteItems, setGalleryPendingDeleteItems] = useState(
+    [],
+  );
+  const [rootPendingDeleteItems, setRootPendingDeleteItems] = useState([]);
+  const [rootPendingDeleteLoading, setRootPendingDeleteLoading] =
+    useState(false);
   const [galleryLoading, setGalleryLoading] = useState(false);
   const [savingReorder, setSavingReorder] = useState(false);
+  const [mediaActionBusyKey, setMediaActionBusyKey] = useState('');
   const [reorderBaseOrder, setReorderBaseOrder] = useState([]);
   const reorderLastToastStageRef = useRef('');
 
@@ -242,6 +350,90 @@ export default function GalleryEdit() {
   useEffect(() => {
     loadCards();
   }, [loadCards]);
+
+  const loadRootPendingDeleteItems = useCallback(async () => {
+    if (!rootMode) {
+      setRootPendingDeleteItems([]);
+      return;
+    }
+
+    setRootPendingDeleteLoading(true);
+    try {
+      const fetched = [];
+      let continuationToken = null;
+
+      do {
+        const params = new URLSearchParams({
+          limit: '1000',
+        });
+        if (continuationToken) {
+          params.set('continuationToken', continuationToken);
+        }
+
+        const res = await fetch(
+          `${PENDING_DELETIONS_API}?${params.toString()}`,
+          {
+            credentials: 'include',
+            headers: { Accept: 'application/json' },
+          },
+        );
+
+        if (res.status === 401) {
+          nav('/login');
+          return;
+        }
+
+        const { data } = await parseApiResponse(
+          res,
+          'Не удалось загрузить список фото под удалением',
+        );
+
+        const batch = Array.isArray(data?.items) ? data.items : [];
+        fetched.push(...batch);
+        continuationToken =
+          data?.isTruncated && data?.nextContinuationToken
+            ? String(data.nextContinuationToken)
+            : null;
+      } while (continuationToken);
+
+      const deduped = Array.from(
+        new Map(
+          fetched
+            .filter((item) => item && typeof item.key === 'string')
+            .map((item) => [item.key, item]),
+        ).values(),
+      );
+
+      deduped.sort((a, b) => {
+        const dueA = Date.parse(String(a?.deleteDueAt || ''));
+        const dueB = Date.parse(String(b?.deleteDueAt || ''));
+        if (Number.isFinite(dueA) && Number.isFinite(dueB) && dueA !== dueB) {
+          return dueA - dueB;
+        }
+        return String(a?.key || '').localeCompare(String(b?.key || ''));
+      });
+
+      setRootPendingDeleteItems(deduped);
+    } catch (err) {
+      notifyError(err, 'Не удалось загрузить список фото под удалением');
+    } finally {
+      setRootPendingDeleteLoading(false);
+    }
+  }, [nav, rootMode]);
+
+  useEffect(() => {
+    if (!rootMode) {
+      setRootPendingDeleteItems([]);
+      setRootPendingDeleteLoading(false);
+      return;
+    }
+    loadRootPendingDeleteItems();
+  }, [loadRootPendingDeleteItems, rootMode]);
+
+  const handleRefreshRoot = useCallback(() => {
+    void loadCards();
+    void loadRootPendingDeleteItems();
+  }, [loadCards, loadRootPendingDeleteItems]);
 
   const sortedCards = useMemo(() => {
     return cards
@@ -513,6 +705,7 @@ export default function GalleryEdit() {
   const loadGalleryItems = useCallback(async () => {
     if (!canUpload) {
       setGalleryItems([]);
+      setGalleryPendingDeleteItems([]);
       setReorderBaseOrder([]);
       return;
     }
@@ -527,6 +720,7 @@ export default function GalleryEdit() {
         const params = new URLSearchParams({
           prefix,
           limit: '1000',
+          includeDeleted: '1',
         });
         if (continuationToken) {
           params.set('continuationToken', continuationToken);
@@ -570,8 +764,12 @@ export default function GalleryEdit() {
         return String(a?.key || '').localeCompare(String(b?.key || ''));
       });
 
-      setGalleryItems(deduped);
-      setReorderBaseOrder(deduped.map((item) => item.key));
+      const activeItems = deduped.filter((item) => !item?.isPendingDeletion);
+      const pendingItems = deduped.filter((item) => item?.isPendingDeletion);
+
+      setGalleryItems(activeItems);
+      setGalleryPendingDeleteItems(pendingItems);
+      setReorderBaseOrder(activeItems.map((item) => item.key));
       reorderLastToastStageRef.current = '';
     } catch (err) {
       notifyError(err, 'Не удалось загрузить фото для сортировки');
@@ -678,6 +876,69 @@ export default function GalleryEdit() {
       throw timeoutErr;
     },
     [nav],
+  );
+
+  const handleMediaSoftDeleteAction = useCallback(
+    async (item, action) => {
+      if (!item?.key || savingReorder) {
+        return;
+      }
+
+      const isRestore = action === 'restore';
+      const confirmed = window.confirm(
+        isRestore
+          ? 'Отменить удаление этого изображения и вернуть исходное имя?'
+          : 'Пометить это изображение на удаление? Файл скроется из галереи и удалится автоматически через 30 дней.',
+      );
+      if (!confirmed) {
+        return;
+      }
+
+      const loadingToastId = notifyLoading(
+        isRestore
+          ? 'Ставим в очередь отмену удаления...'
+          : 'Ставим в очередь удаление...',
+      );
+      setMediaActionBusyKey(item.key);
+
+      try {
+        const res = await csrfFetch(MEDIA_SOFT_DELETE_API, {
+          method: 'POST',
+          body: JSON.stringify({
+            path: targetPathFromUrl,
+            key: item.key,
+            action,
+          }),
+        });
+        const { status, message } = await parseApiResponse(
+          res,
+          isRestore
+            ? 'Не удалось отменить удаление изображения'
+            : 'Не удалось пометить изображение на удаление',
+        );
+
+        notify({
+          status,
+          message:
+            message ||
+            (isRestore
+              ? 'Удаление отменено'
+              : 'Изображение помечено на удаление'),
+        });
+        await loadGalleryItems();
+      } catch (err) {
+        notifyError(
+          err,
+          isRestore
+            ? 'Не удалось отменить удаление изображения'
+            : 'Не удалось пометить изображение на удаление',
+        );
+      } finally {
+        setMediaActionBusyKey('');
+        sileo.dismiss(loadingToastId);
+      }
+    },
+    [csrfFetch, loadGalleryItems, savingReorder, targetPathFromUrl],
   );
 
   const handleSaveReorder = async () => {
@@ -804,7 +1065,7 @@ export default function GalleryEdit() {
         <section className={styles.managerSection}>
           <div className={styles.sectionHead}>
             <h1>Создание и редактирование карточек</h1>
-            <button type="button" onClick={loadCards}>
+            <button type="button" onClick={handleRefreshRoot}>
               Обновить
             </button>
           </div>
@@ -1013,6 +1274,39 @@ export default function GalleryEdit() {
               </tbody>
             </table>
           </div>
+
+          <div className={styles.rootPendingSection}>
+            <div className={styles.rootPendingHead}>
+              <h2>Фото под удалением</h2>
+              <button
+                type="button"
+                onClick={loadRootPendingDeleteItems}
+                disabled={rootPendingDeleteLoading}
+              >
+                {rootPendingDeleteLoading ? 'Обновляем...' : 'Обновить список'}
+              </button>
+            </div>
+
+            {rootPendingDeleteLoading ? (
+              <div className={styles.reorderEmpty}>
+                Загружаем фото под удалением...
+              </div>
+            ) : rootPendingDeleteItems.length === 0 ? (
+              <div className={styles.reorderEmpty}>
+                Фото под удалением не найдено
+              </div>
+            ) : (
+              <div className={styles.rootPendingGrid}>
+                {rootPendingDeleteItems.map((item) => (
+                  <RootPendingDeleteCard
+                    key={item.key}
+                    item={item}
+                    onOpenFolder={(folderPath) => nav(`/edit/${folderPath}`)}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
         </section>
       ) : (
         <section className={styles.uploadSection}>
@@ -1064,7 +1358,9 @@ export default function GalleryEdit() {
                 <button
                   type="button"
                   onClick={loadGalleryItems}
-                  disabled={galleryLoading || savingReorder}
+                  disabled={
+                    galleryLoading || savingReorder || !!mediaActionBusyKey
+                  }
                 >
                   Обновить
                 </button>
@@ -1074,6 +1370,7 @@ export default function GalleryEdit() {
                   disabled={
                     galleryLoading ||
                     savingReorder ||
+                    !!mediaActionBusyKey ||
                     galleryItems.length === 0 ||
                     !reorderDirty
                   }
@@ -1091,22 +1388,54 @@ export default function GalleryEdit() {
 
             {galleryLoading ? (
               <div className={styles.reorderEmpty}>Загружаем фотографии...</div>
-            ) : galleryItems.length === 0 ? (
-              <div className={styles.reorderEmpty}>
-                Пока нет фото для перетаскивания
-              </div>
             ) : (
               <DragDropProvider onDragEnd={handleDragEnd}>
-                <div className={styles.reorderGrid}>
-                  {galleryItems.map((item, index) => (
-                    <SortablePreviewCard
-                      key={item.key}
-                      item={item}
-                      index={index}
-                      disabled={savingReorder}
-                    />
-                  ))}
-                </div>
+                {galleryItems.length === 0 ? (
+                  <div className={styles.reorderEmpty}>
+                    {galleryPendingDeleteItems.length > 0
+                      ? 'Активных фото нет, но есть изображения под удалением'
+                      : 'Пока нет фото для перетаскивания'}
+                  </div>
+                ) : (
+                  <div className={styles.reorderGrid}>
+                    {galleryItems.map((item, index) => (
+                      <SortablePreviewCard
+                        key={item.key}
+                        item={item}
+                        index={index}
+                        group="gallery-edit-order"
+                        disabled={savingReorder || !!mediaActionBusyKey}
+                        actionBusy={mediaActionBusyKey === item.key}
+                        onDelete={(targetItem) =>
+                          handleMediaSoftDeleteAction(targetItem, 'delete')
+                        }
+                      />
+                    ))}
+                  </div>
+                )}
+
+                {galleryPendingDeleteItems.length > 0 && (
+                  <div className={styles.pendingDeleteSection}>
+                    <p className={styles.pendingDeleteTitle}>
+                      Изображения под удалением (видно только в edit)
+                    </p>
+                    <div className={styles.reorderGrid}>
+                      {galleryPendingDeleteItems.map((item, index) => (
+                        <SortablePreviewCard
+                          key={item.key}
+                          item={item}
+                          index={index}
+                          group="gallery-edit-pending-delete"
+                          disabled={savingReorder || !!mediaActionBusyKey}
+                          actionBusy={mediaActionBusyKey === item.key}
+                          onRestore={(targetItem) =>
+                            handleMediaSoftDeleteAction(targetItem, 'restore')
+                          }
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
               </DragDropProvider>
             )}
           </div>

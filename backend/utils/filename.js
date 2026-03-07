@@ -1,11 +1,11 @@
 import path from 'path';
+import { parseNumericIndexFromBase } from './deletionMarker.js';
 
 export function parseIndexFromKey(key) {
-    // key может быть 'preview/2024/trips/10.jpg' или '10.jpg'
-    const base = path.basename(key);
-    const name = base.replace(/\.[^/.]+$/, ''); // '10'
-    const n = parseInt(name, 10);
-    return Number.isFinite(n) ? n : null;
+    const baseWithExt = path.posix.basename(String(key || ''));
+    const ext = path.posix.extname(baseWithExt);
+    const baseNoExt = ext ? baseWithExt.slice(0, -ext.length) : baseWithExt;
+    return parseNumericIndexFromBase(baseNoExt);
 }
 
 export function sortByNumericFilename(keys) {

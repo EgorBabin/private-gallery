@@ -113,6 +113,70 @@
   -webkit-overflow-scrolling: touch;
 }
 
+.rootPendingSection {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--color-border);
+  display: grid;
+  gap: 10px;
+}
+
+.rootPendingHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.rootPendingHead h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.rootPendingGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.rootPendingCard {
+  display: grid;
+  gap: 8px;
+  padding: 8px;
+  border-radius: 10px;
+  border: 1px solid var(--color-border);
+  background: var(--color-background-overlay-soft);
+}
+
+.rootPendingImage {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  border-radius: 8px;
+  object-fit: cover;
+  opacity: 0.52;
+}
+
+.rootPendingMeta {
+  display: grid;
+  gap: 4px;
+}
+
+.rootPendingMeta p {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--color-text-secondary);
+  word-break: break-word;
+}
+
+.rootPendingMeta strong {
+  color: var(--color-text-primary);
+}
+
+.rootPendingOpenButton {
+  width: 100%;
+}
+
 .table {
   width: 100%;
   border-collapse: collapse;
@@ -316,6 +380,10 @@
   cursor: default;
 }
 
+.reorderCardPendingDelete {
+  border-color: var(--color-border-strong);
+}
+
 .reorderHandle {
   position: absolute;
   top: 6px;
@@ -339,11 +407,63 @@
   text-align: center;
 }
 
+.reorderDeleteBadge {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: calc(100% - 44px);
+  padding: 4px 6px;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  background: var(--color-background-overlay-soft);
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border-strong);
+  backdrop-filter: blur(3px);
+  pointer-events: none;
+}
+
+.reorderDeleteBadge span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.main button.reorderActionButton {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 3;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--color-border-strong);
+}
+
+.main button.reorderActionDelete {
+  background: var(--color-background-overlay-soft);
+}
+
+.main button.reorderActionRestore {
+  background: linear-gradient(180deg, var(--accent-1), var(--accent-1-strong));
+}
+
 .reorderImage {
   width: 100%;
   height: 100%;
   object-fit: cover;
   display: block;
+}
+
+.reorderImagePendingDelete {
+  opacity: 0.75;
 }
 
 .reorderVideoBadge {
@@ -360,6 +480,39 @@
   justify-content: center;
   z-index: 2;
   pointer-events: none;
+}
+
+.reorderPendingInfo {
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  bottom: 6px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 7px;
+  border-radius: 8px;
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-background-overlay-soft);
+  backdrop-filter: blur(3px);
+  font-size: 0.7rem;
+  color: var(--color-text-primary);
+  pointer-events: none;
+}
+
+.pendingDeleteSection {
+  margin-top: 4px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--color-border-strong);
+  display: grid;
+  gap: 8px;
+}
+
+.pendingDeleteTitle {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: 0.84rem;
 }
 
 @media (max-width: 1200px) {

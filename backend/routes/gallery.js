@@ -1,6 +1,6 @@
 import express from 'express';
 import { listObjects, getSignedUrlForKey } from '../utils/s3Client.js';
-import { parseIndexFromKey } from '../utils/filename.js';
+import { parseNumericIndexFromBase } from '../utils/deletionMarker.js';
 import { logAction } from '../utils/logger.js';
 import {
     listCards,
@@ -8,6 +8,7 @@ import {
     updateCardPreviewKey,
 } from '../utils/cardsStore.js';
 import path from 'path';
+import { parseSoftDeleteBase } from '../utils/deletionMarker.js';
 
 const router = express.Router();
 
@@ -168,7 +169,14 @@ function isImageKey(key, prefixNoSlash, prefixWithSlash) {
     if (key.endsWith('/')) {
         return false;
     }
-    return /\.(jpe?g|png|webp|avif|gif)$/i.test(key);
+    if (!/\.(jpe?g|png|webp|avif|gif)$/i.test(key)) {
+        return false;
+    }
+
+    const baseWithExt = path.posix.basename(String(key));
+    const ext = path.posix.extname(baseWithExt);
+    const baseNoExt = ext ? baseWithExt.slice(0, -ext.length) : baseWithExt;
+    return !parseSoftDeleteBase(baseNoExt);
 }
 
 async function loadCardStatsFromS3(cardPath) {
@@ -329,6 +337,18 @@ router.get('/previews', async (req, res) => {
             Number.isInteger(parsedLimit) && parsedLimit > 0
                 ? Math.min(parsedLimit, 1000)
                 : 200;
+        const includeDeletedRequested = String(
+            req.query.includeDeleted || '',
+        ).trim();
+        const includeDeletedByRole =
+            String(req.session?.user?.role || '')
+                .trim()
+                .toLowerCase() === 'admin';
+        const includeDeleted =
+            includeDeletedByRole &&
+            ['1', 'true', 'yes'].includes(
+                includeDeletedRequested.toLowerCase(),
+            );
         const continuationToken = req.query.continuationToken;
 
         const fullPrefix = `${PREVIEW_ROOT}${normalizedPrefix}/`;
@@ -366,21 +386,42 @@ router.get('/previews', async (req, res) => {
         });
 
         // преобразуем в объекты с индексом и url (вызываем signed url только для реальных файлов)
-        const items = await Promise.all(
+        const mappedItems = await Promise.all(
             fileContents.map(async (obj) => {
-                const idx = parseIndexFromKey(obj.Key) ?? 0;
-
                 const baseWithExt = path.posix.basename(obj.Key); // e.g. "video_12345.webp" or "12345.webp"
                 const ext = path.posix.extname(baseWithExt);
                 const rawBase = ext
                     ? baseWithExt.slice(0, -ext.length)
                     : baseWithExt;
-                const isVideo = rawBase.startsWith('video_');
-                const name = isVideo ? rawBase.replace(/^video_/, '') : rawBase;
+                const softDeleteMeta = parseSoftDeleteBase(rawBase);
+
+                if (softDeleteMeta && !includeDeleted) {
+                    return null;
+                }
+
+                const displayBase =
+                    softDeleteMeta?.originalBase || String(rawBase || '');
+                const idx = parseNumericIndexFromBase(displayBase) ?? 0;
+                const isVideo = displayBase.startsWith('video_');
+                const name = isVideo
+                    ? displayBase.replace(/^video_/, '')
+                    : displayBase;
 
                 const url = await getSignedUrlForKey(obj.Key, 60 * 5, {
                     skipHead: true,
                 });
+
+                const deleteDueAt = softDeleteMeta?.deleteAt || null;
+                const deleteDaysLeft = deleteDueAt
+                    ? Math.max(
+                          0,
+                          Math.ceil(
+                              (deleteDueAt.getTime() - Date.now()) /
+                                  (24 * 60 * 60 * 1000),
+                          ),
+                      )
+                    : null;
+
                 return {
                     key: obj.Key,
                     url,
@@ -389,9 +430,13 @@ router.get('/previews', async (req, res) => {
                     lastModified: obj.LastModified,
                     isVideo, // video preview
                     name,
+                    isPendingDeletion: Boolean(softDeleteMeta),
+                    deleteDueAt: deleteDueAt ? deleteDueAt.toISOString() : null,
+                    deleteDaysLeft,
                 };
             }),
         );
+        const items = mappedItems.filter(Boolean);
 
         items.sort((a, b) => a.index - b.index);
 

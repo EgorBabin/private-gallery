@@ -21,6 +21,12 @@ import {
     syncCardByPath,
     normalizePreviewInput,
 } from '../utils/galleryCardSync.js';
+import {
+    buildSoftDeletedBase,
+    getSoftDeleteRetentionDays,
+    parseSoftDeleteBase,
+    parseNumericIndexFromBase,
+} from '../utils/deletionMarker.js';
 import { publishPhotoJob } from '../utils/rabbitmq.js';
 import { logAction } from '../utils/logger.js';
 import { sendError, sendSuccess } from '../utils/apiResponse.js';
@@ -71,7 +77,12 @@ const PROCESSING_SOURCE_ROOT = 'processing/source/';
 const REORDER_STATUS_ROOT = 'processing/reorder/';
 const CARDS_S3_CONCURRENCY = 4;
 const REORDER_S3_CONCURRENCY = 8;
+const PENDING_DELETE_S3_CONCURRENCY = 6;
 const MEDIA_FILE_RE = /\.(jpe?g|png|webp|avif|gif|mp4|tiff?)$/i;
+const SOFT_DELETE_JOB_TYPE = 'gallery-soft-delete';
+const SOFT_DELETE_ACTION_DELETE = 'delete';
+const SOFT_DELETE_ACTION_RESTORE = 'restore';
+const SOFT_DELETE_RETENTION_DAYS = getSoftDeleteRetentionDays();
 
 function makeNumericName(req) {
     const now = BigInt(Date.now());
@@ -133,13 +144,12 @@ function stripExt(name) {
 
 function parseSortableIndexFromKey(key) {
     const baseWithExt = path.posix.basename(String(key || ''));
-    const baseNoExt = stripExt(baseWithExt).replace(/^video_/, '');
-    const match = baseNoExt.match(/(\d+)$/);
-    if (!match) {
+    const baseNoExt = stripExt(baseWithExt);
+    const parsed = parseNumericIndexFromBase(baseNoExt);
+    if (!Number.isFinite(parsed)) {
         return Number.MAX_SAFE_INTEGER;
     }
-    const parsed = Number(match[1]);
-    return Number.isFinite(parsed) ? parsed : Number.MAX_SAFE_INTEGER;
+    return parsed;
 }
 
 function comparePreviewObjects(a, b) {
@@ -210,10 +220,14 @@ function extractVariantFromKey(key, folderPath) {
             return null;
         }
         const rawBase = stripExt(relative);
-        const groupBase =
-            root.type.startsWith('video_') && !rawBase.startsWith('video_')
-                ? `video_${rawBase}`
-                : rawBase;
+        let groupBase = rawBase;
+        if (
+            root.type.startsWith('video_') &&
+            !rawBase.startsWith('video_') &&
+            !rawBase.startsWith('delete_')
+        ) {
+            groupBase = `video_${rawBase}`;
+        }
         return {
             type: root.type,
             key: cleanKey,
@@ -254,6 +268,82 @@ function parsePreviewBaseFromKey(key, folderPath) {
         return null;
     }
     return stripExt(relative);
+}
+
+function parsePendingDeletePreviewMeta(previewKey) {
+    const key = sanitizeS3Key(previewKey);
+    if (!key.startsWith(PREVIEW_ROOT)) {
+        return null;
+    }
+
+    const relative = key.slice(PREVIEW_ROOT.length);
+    const parts = relative.split('/').filter(Boolean);
+    if (parts.length !== 3) {
+        return null;
+    }
+
+    const folderPathCandidate = `${parts[0] || ''}/${parts[1] || ''}`;
+    const parsedFolderPath = parseCardPath(folderPathCandidate);
+    if (!parsedFolderPath) {
+        return null;
+    }
+
+    const fileName = parts[2] || '';
+    const ext = path.posix.extname(fileName);
+    if (!ext) {
+        return null;
+    }
+
+    const rawBase = stripExt(fileName);
+    const softDeleteMeta = parseSoftDeleteBase(rawBase);
+    if (!softDeleteMeta) {
+        return null;
+    }
+
+    const displayBase = softDeleteMeta.originalBase;
+    const isVideo = displayBase.startsWith('video_');
+    const name = isVideo ? displayBase.replace(/^video_/, '') : displayBase;
+    const deleteDueAt = softDeleteMeta.deleteAt;
+    const deleteCreatedAt = softDeleteMeta.deleteCreatedAt || null;
+    const deleteDaysLeft = Math.max(
+        0,
+        Math.ceil((deleteDueAt.getTime() - Date.now()) / (24 * 60 * 60 * 1000)),
+    );
+
+    return {
+        key,
+        folderPath: parsedFolderPath.path,
+        name,
+        isVideo,
+        deleteDueAt: deleteDueAt.toISOString(),
+        deleteCreatedAt: deleteCreatedAt ? deleteCreatedAt.toISOString() : null,
+        deleteDaysLeft,
+    };
+}
+
+function isSoftDeletedPreviewKey(key, folderPath) {
+    const base = parsePreviewBaseFromKey(key, folderPath);
+    if (!base) {
+        return false;
+    }
+    return Boolean(parseSoftDeleteBase(base));
+}
+
+function normalizeSoftDeleteAction(value) {
+    const action = String(value || '')
+        .trim()
+        .toLowerCase();
+    if (action === SOFT_DELETE_ACTION_DELETE) {
+        return SOFT_DELETE_ACTION_DELETE;
+    }
+    if (action === SOFT_DELETE_ACTION_RESTORE) {
+        return SOFT_DELETE_ACTION_RESTORE;
+    }
+    return null;
+}
+
+function makeSoftDeleteJobId() {
+    return `sd-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
 function makeReorderJobId() {
@@ -712,6 +802,309 @@ router.post('/upload', upload.single('image'), async (req, res) => {
     }
 });
 
+router.post('/media-soft-delete', async (req, res) => {
+    try {
+        const body = req.body || {};
+        const parsedFolderPath = parseCardPath(body.path || body.prefix || '');
+        if (!parsedFolderPath) {
+            return sendError(res, {
+                httpStatus: 400,
+                status: 'warning',
+                message:
+                    'Некорректный path. Используйте формат "year/category"',
+            });
+        }
+
+        const folderPath = parsedFolderPath.path;
+        const action = normalizeSoftDeleteAction(body.action);
+        if (!action) {
+            return sendError(res, {
+                httpStatus: 400,
+                status: 'warning',
+                message:
+                    'Некорректное действие. Используйте delete или restore',
+            });
+        }
+
+        const previewKey = sanitizeS3Key(body.key || body.previewKey || '');
+        const expectedPreviewPrefix = `${PREVIEW_ROOT}${folderPath}/`;
+        if (!previewKey.startsWith(expectedPreviewPrefix)) {
+            return sendError(res, {
+                httpStatus: 400,
+                status: 'warning',
+                message:
+                    'Ключ изображения должен относиться к текущей папке preview',
+            });
+        }
+
+        const sourceGroupBase = parsePreviewBaseFromKey(previewKey, folderPath);
+        if (!sourceGroupBase) {
+            return sendError(res, {
+                httpStatus: 400,
+                status: 'warning',
+                message: 'Некорректный preview key',
+            });
+        }
+
+        const sourceDeleteMeta = parseSoftDeleteBase(sourceGroupBase);
+        if (action === SOFT_DELETE_ACTION_DELETE && sourceDeleteMeta) {
+            return sendError(res, {
+                httpStatus: 409,
+                status: 'warning',
+                message: 'Изображение уже помечено на удаление',
+            });
+        }
+        if (action === SOFT_DELETE_ACTION_RESTORE && !sourceDeleteMeta) {
+            return sendError(res, {
+                httpStatus: 409,
+                status: 'warning',
+                message: 'Изображение не находится в статусе удаления',
+            });
+        }
+
+        await ensureCardExists(folderPath);
+
+        let targetGroupBase = sourceGroupBase;
+        if (action === SOFT_DELETE_ACTION_DELETE) {
+            targetGroupBase = buildSoftDeletedBase(sourceGroupBase, {
+                retentionDays: SOFT_DELETE_RETENTION_DAYS,
+            });
+        } else if (sourceDeleteMeta) {
+            targetGroupBase = sourceDeleteMeta.originalBase;
+        }
+
+        const prefixes = [
+            `${PREVIEW_ROOT}${folderPath}/`,
+            ...SCREEN_DIRS.map((dir) => `${dir}/${folderPath}/`),
+            `${ORIGINAL_ROOT}${folderPath}/`,
+            ...VIDEO_DIRS.map((dir) => `${dir}/${folderPath}/`),
+        ];
+
+        const listed = await Promise.all(
+            prefixes.map(async (prefix) => {
+                const objects = await listAllObjectsForPrefix(prefix);
+                return objects.filter((obj) => isFileObject(obj, prefix));
+            }),
+        );
+
+        const allObjects = listed.flat().filter(Boolean);
+        const existingKeySet = new Set(
+            allObjects.map((obj) => sanitizeS3Key(obj?.Key)),
+        );
+
+        const sourceVariants = (
+            await mapWithConcurrency(
+                allObjects,
+                REORDER_S3_CONCURRENCY,
+                async (obj) => {
+                    const variant = extractVariantFromKey(obj?.Key, folderPath);
+                    if (!variant || variant.groupBase !== sourceGroupBase) {
+                        return null;
+                    }
+
+                    let hash = normalizeEtag(obj?.ETag);
+                    let size = Number(obj?.Size) || 0;
+                    if (!hash) {
+                        const meta = await headObjectMeta(variant.key, {
+                            silentNotFound: true,
+                        });
+                        hash = normalizeEtag(meta?.etag);
+                        size = Number(meta?.size) || size;
+                    }
+                    if (!hash) {
+                        throw new Error(
+                            `Не удалось получить hash для объекта ${variant.key}`,
+                        );
+                    }
+
+                    return {
+                        ...variant,
+                        hash,
+                        size,
+                    };
+                },
+            )
+        ).filter(Boolean);
+
+        if (sourceVariants.length === 0) {
+            return sendError(res, {
+                httpStatus: 404,
+                status: 'warning',
+                message:
+                    'Не удалось найти файлы изображения для переименования',
+            });
+        }
+
+        const sourceKeySet = new Set(sourceVariants.map((item) => item.key));
+        const targetKeySet = new Set();
+        const moves = [];
+
+        for (const variant of sourceVariants) {
+            const targetKey = sanitizeS3Key(
+                buildTargetKeyForVariant(variant, folderPath, targetGroupBase),
+            );
+
+            if (!targetKey) {
+                continue;
+            }
+
+            if (targetKeySet.has(targetKey)) {
+                throw new Error(`duplicate target key generated: ${targetKey}`);
+            }
+            targetKeySet.add(targetKey);
+
+            if (
+                targetKey !== variant.key &&
+                !sourceKeySet.has(targetKey) &&
+                existingKeySet.has(targetKey)
+            ) {
+                return sendError(res, {
+                    httpStatus: 409,
+                    status: 'warning',
+                    message:
+                        'Целевое имя уже занято. Обновите список и повторите действие.',
+                });
+            }
+
+            moves.push({
+                sourceKey: variant.key,
+                targetKey,
+                hash: variant.hash,
+                size: variant.size,
+            });
+        }
+
+        if (moves.length === 0) {
+            return sendError(res, {
+                httpStatus: 400,
+                status: 'warning',
+                message: 'Не найдено файлов для переименования',
+            });
+        }
+
+        const queuedAt = new Date().toISOString();
+        const jobId = makeSoftDeleteJobId();
+        const deleteMeta =
+            action === SOFT_DELETE_ACTION_DELETE
+                ? parseSoftDeleteBase(targetGroupBase)
+                : null;
+
+        await publishPhotoJob({
+            jobType: SOFT_DELETE_JOB_TYPE,
+            action,
+            jobId,
+            queuedAt,
+            folderPath,
+            sourceGroupBase,
+            targetGroupBase,
+            moves,
+        });
+
+        sendSuccess(res, {
+            httpStatus: 202,
+            status: 'accepted',
+            message:
+                action === SOFT_DELETE_ACTION_DELETE
+                    ? `Изображение помечено на удаление. Автоудаление через ${SOFT_DELETE_RETENTION_DAYS} дней.`
+                    : 'Удаление отменено. Возвращаем исходное имя.',
+            payload: {
+                action,
+                jobId,
+                queuedAt,
+                totalMoves: moves.length,
+                deleteDueAt: deleteMeta?.deleteAt?.toISOString() || null,
+                deleteDueDateToken: deleteMeta?.deleteAtToken || null,
+            },
+        });
+        logAction(
+            req,
+            'accepted media soft-delete action',
+            `${action} ${folderPath} ${previewKey}
+            #galleryEdit.js #media-soft-delete`,
+        );
+    } catch (err) {
+        console.error('media-soft-delete route error', err);
+        sendError(res, {
+            httpStatus: 500,
+            message: 'Не удалось отправить задачу удаления изображения',
+        });
+    }
+});
+
+router.get('/pending-deletions', async (req, res) => {
+    try {
+        const parsedLimit = Number.parseInt(req.query.limit || '500', 10);
+        const limit =
+            Number.isInteger(parsedLimit) && parsedLimit > 0
+                ? Math.min(parsedLimit, 1000)
+                : 500;
+        const continuationToken = String(
+            req.query.continuationToken || '',
+        ).trim();
+
+        const page = await listObjects(
+            PREVIEW_ROOT,
+            limit,
+            continuationToken || undefined,
+        );
+        const contents = Array.isArray(page?.Contents) ? page.Contents : [];
+
+        const pendingItemsRaw = await mapWithConcurrency(
+            contents,
+            PENDING_DELETE_S3_CONCURRENCY,
+            async (obj) => {
+                const key = sanitizeS3Key(obj?.Key);
+                if (!key || key.endsWith('/')) {
+                    return null;
+                }
+
+                const parsed = parsePendingDeletePreviewMeta(key);
+                if (!parsed) {
+                    return null;
+                }
+
+                const url = await getSignedUrlForKey(key, 60 * 5, {
+                    skipHead: true,
+                });
+                return {
+                    ...parsed,
+                    url,
+                    size: Number(obj?.Size) || 0,
+                    lastModified: obj?.LastModified || null,
+                };
+            },
+        );
+
+        const items = pendingItemsRaw.filter(Boolean).sort((a, b) => {
+            const dueA = Date.parse(a.deleteDueAt || '');
+            const dueB = Date.parse(b.deleteDueAt || '');
+            if (
+                Number.isFinite(dueA) &&
+                Number.isFinite(dueB) &&
+                dueA !== dueB
+            ) {
+                return dueA - dueB;
+            }
+            return String(a.key || '').localeCompare(String(b.key || ''));
+        });
+
+        sendSuccess(res, {
+            message: 'Список фото под удалением загружен',
+            payload: {
+                items,
+                isTruncated: Boolean(page?.IsTruncated),
+                nextContinuationToken: page?.NextContinuationToken || null,
+            },
+        });
+    } catch (err) {
+        console.error('pending-deletions route error', err);
+        sendError(res, {
+            httpStatus: 500,
+            message: 'Не удалось загрузить список фото под удалением',
+        });
+    }
+});
+
 router.post('/reorder', async (req, res) => {
     let statusKey = null;
     try {
@@ -759,7 +1152,11 @@ router.post('/reorder', async (req, res) => {
         const previewPrefix = `${PREVIEW_ROOT}${folderPath}/`;
         const previewObjects = (
             await listAllObjectsForPrefix(previewPrefix)
-        ).filter((obj) => isFileObject(obj, previewPrefix));
+        ).filter(
+            (obj) =>
+                isFileObject(obj, previewPrefix) &&
+                !isSoftDeletedPreviewKey(obj?.Key, folderPath),
+        );
         if (previewObjects.length === 0) {
             return sendError(res, {
                 httpStatus: 404,

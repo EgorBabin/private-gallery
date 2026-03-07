@@ -6,6 +6,7 @@ import {
 } from '../utils/s3Client.js';
 import { syncCardByPath } from '../utils/galleryCardSync.js';
 import { processGalleryReorderJob } from './galleryReorderJobProcessor.js';
+import { processGallerySoftDeleteJob } from './gallerySoftDeleteJobProcessor.js';
 
 sharp.concurrency(1);
 sharp.cache(false);
@@ -22,6 +23,7 @@ const WEBP_OPTIONS = { quality: 85, effort: 6 };
 const SHARP_INPUT_OPTIONS = { failOn: 'truncated' };
 const JOB_TYPE_UPLOAD = 'photo-upload';
 const JOB_TYPE_REORDER = 'gallery-reorder';
+const JOB_TYPE_SOFT_DELETE = 'gallery-soft-delete';
 
 function normalizeUploadJob(rawPayload) {
     const payload =
@@ -250,6 +252,9 @@ export async function processPhotoJob(rawPayload) {
 
     if (rawJobType === JOB_TYPE_REORDER) {
         return processGalleryReorderJob(payload);
+    }
+    if (rawJobType === JOB_TYPE_SOFT_DELETE) {
+        return processGallerySoftDeleteJob(payload);
     }
 
     return processUploadJob(payload);
