@@ -11,10 +11,10 @@ const API = '/api/gallery';
 const LS_KEY = 'gallery_items_cache';
 const CARDS_LS_KEY = 'gallery_cards_cache';
 const MASONRY_BREAKPOINTS = {
-  0: 2,
-  760: 3,
-  980: 4,
-  1200: 5,
+  0: 3,
+  760: 4,
+  980: 5,
+  1200: 6,
 };
 const MASONRY_GUTTER_BREAKPOINTS = {
   0: '3px',

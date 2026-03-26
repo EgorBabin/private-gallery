@@ -98,10 +98,13 @@ router.get('/callback', async (req, res) => {
         }
         const userInfo = await infoRes.json();
 
-        const email = userInfo.default_email;
-        if (typeof email !== 'string' || !email.trim()) {
+        if (
+            typeof userInfo.default_email !== 'string' ||
+            !userInfo.default_email.trim()
+        ) {
             throw new Error('Yandex profile email is missing');
         }
+        const email = userInfo.default_email.trim().toLowerCase();
 
         const userQuery = `
             SELECT * FROM users
