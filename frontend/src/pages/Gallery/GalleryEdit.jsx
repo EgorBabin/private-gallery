@@ -296,7 +296,7 @@ export default function GalleryEdit() {
   const [editForms, setEditForms] = useState({});
 
   const [files, setFiles] = useState([]);
-  const [previewUrl, setPreviewUrl] = useState('');
+  const [previewUrls, setPreviewUrls] = useState([]);
   const [isVideo, setIsVideo] = useState(false);
   const [galleryItems, setGalleryItems] = useState([]);
   const [galleryPendingDeleteItems, setGalleryPendingDeleteItems] = useState(
@@ -313,13 +313,21 @@ export default function GalleryEdit() {
 
   useEffect(() => {
     if (!files || files.length === 0) {
-      setPreviewUrl('');
+      setPreviewUrls([]);
       return;
     }
-    const url = URL.createObjectURL(files[0]);
-    setPreviewUrl(url);
-    return () => URL.revokeObjectURL(url);
+
+    const urls = files.map((file) => URL.createObjectURL(file));
+    setPreviewUrls(urls);
+
+    return () => {
+      urls.forEach((url) => URL.revokeObjectURL(url));
+    };
   }, [files]);
+
+  const handleRemoveSelectedFile = useCallback((removeIndex) => {
+    setFiles((prev) => prev.filter((_, index) => index !== removeIndex));
+  }, []);
 
   const loadCards = useCallback(async () => {
     setCardsLoading(true);
@@ -1333,9 +1341,25 @@ export default function GalleryEdit() {
             </button>
           )}
 
-          {previewUrl ? (
-            <div className={styles.container}>
-              <img src={previewUrl} alt="preview" className={styles.img} />
+          {files.length > 0 ? (
+            <div className={styles.selectedFilesGrid}>
+              {files.map((file, index) => (
+                <div className={styles.selectedFileItem} key={`${file.name}-${index}`}>
+                  <button
+                    type="button"
+                    className={`${styles.reorderActionButton} ${styles.reorderActionDelete}`}
+                    onClick={() => handleRemoveSelectedFile(index)}
+                    aria-label={`Удалить файл ${file.name || index + 1}`}
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                  <img
+                    src={previewUrls[index]}
+                    alt={file.name || `selected-${index + 1}`}
+                    className={styles.selectedFilePreview}
+                  />
+                </div>
+              ))}
             </div>
           ) : (
             <div className={styles.item}>Прикрепите фотографию</div>
@@ -1356,14 +1380,22 @@ export default function GalleryEdit() {
             multiple
             onChange={(e) => {
               const selected = e.target.files ? Array.from(e.target.files) : [];
-              if (selected.length > MAX_UPLOAD_IMAGES) {
-                notify({
-                  status: 'warning',
-                  message: `Максимум ${MAX_UPLOAD_IMAGES} файлов`,
-                });
+              if (selected.length === 0) {
                 return;
               }
-              setFiles(selected);
+
+              setFiles((prev) => {
+                const combined = [...prev, ...selected];
+                if (combined.length > MAX_UPLOAD_IMAGES) {
+                  notify({
+                    status: 'warning',
+                    message: `Максимум ${MAX_UPLOAD_IMAGES} файлов`,
+                  });
+                  return combined.slice(0, MAX_UPLOAD_IMAGES);
+                }
+                return combined;
+              });
+              e.target.value = '';
             }}
           />
 
