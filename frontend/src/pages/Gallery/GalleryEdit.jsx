@@ -47,6 +47,10 @@ const REORDER_STAGE_MESSAGES = {
   error: 'Ошибка переименования фотографий',
 };
 
+const MAX_UPLOAD_IMAGES = Number(
+  import.meta.env.VITE_MAX_UPLOAD_IMAGES ?? import.meta.env.MAX_UPLOAD_IMAGES ?? 10,
+);
+
 function validationError(message) {
   const err = new Error(message);
   err.status = 'warning';
@@ -291,7 +295,7 @@ export default function GalleryEdit() {
 
   const [editForms, setEditForms] = useState({});
 
-  const [file, setFile] = useState(null);
+  const [files, setFiles] = useState([]);
   const [previewUrl, setPreviewUrl] = useState('');
   const [isVideo, setIsVideo] = useState(false);
   const [galleryItems, setGalleryItems] = useState([]);
@@ -308,14 +312,14 @@ export default function GalleryEdit() {
   const reorderLastToastStageRef = useRef('');
 
   useEffect(() => {
-    if (!file) {
+    if (!files || files.length === 0) {
       setPreviewUrl('');
       return;
     }
-    const url = URL.createObjectURL(file);
+    const url = URL.createObjectURL(files[0]);
     setPreviewUrl(url);
     return () => URL.revokeObjectURL(url);
-  }, [file]);
+  }, [files]);
 
   const loadCards = useCallback(async () => {
     setCardsLoading(true);
@@ -1009,23 +1013,28 @@ export default function GalleryEdit() {
       });
       return;
     }
-    if (!file) {
+    if (!files || files.length === 0) {
       notify({
         status: 'warning',
-        message: 'Прикрепите файл',
-      });
-      return;
-    }
-    if (!file.type.startsWith('image/')) {
-      notify({
-        status: 'warning',
-        message: 'Можно загружать только изображения (превью)',
+        message: 'Прикрепите файл(ы)',
       });
       return;
     }
 
+    for (const f of files) {
+      if (!f.type || !f.type.startsWith('image/')) {
+        notify({
+          status: 'warning',
+          message: 'Можно загружать только изображения (превью)',
+        });
+        return;
+      }
+    }
+
     const formData = new FormData();
-    formData.append('image', file);
+    for (const f of files) {
+      formData.append('image', f);
+    }
     formData.append('path', targetPathFromUrl);
     if (isVideo) {
       formData.append('video', 'true');
@@ -1047,7 +1056,7 @@ export default function GalleryEdit() {
         message:
           message || 'Файл принят. Количество фото обновится после обработки.',
       });
-      setFile(null);
+      setFiles([]);
       setIsVideo(false);
       void loadGalleryItems();
     } catch (err) {
@@ -1344,7 +1353,18 @@ export default function GalleryEdit() {
           <input
             type="file"
             accept="image/*"
-            onChange={(e) => setFile(e.target.files && e.target.files[0])}
+            multiple
+            onChange={(e) => {
+              const selected = e.target.files ? Array.from(e.target.files) : [];
+              if (selected.length > MAX_UPLOAD_IMAGES) {
+                notify({
+                  status: 'warning',
+                  message: `Максимум ${MAX_UPLOAD_IMAGES} файлов`,
+                });
+                return;
+              }
+              setFiles(selected);
+            }}
           />
 
           <button type="button" onClick={handleUpload}>

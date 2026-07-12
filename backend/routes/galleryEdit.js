@@ -54,7 +54,8 @@ const upload = multer({
     storage: multer.memoryStorage(),
     limits: {
         fileSize: MAX_UPLOAD_BYTES,
-        files: 1,
+        // keep per-file size check; do not enforce `files` here so frontend
+        // controls maximum count via environment. Multer will still enforce fileSize.
     },
     fileFilter: (req, file, cb) => {
         void req;
@@ -646,8 +647,8 @@ router.delete('/cards-admin/:id', async (req, res) => {
     }
 });
 
-router.post('/upload', upload.single('image'), async (req, res) => {
-    let statusKey = null;
+router.post('/upload', upload.array('image'), async (req, res) => {
+    let anyStatusKeys = [];
     try {
         const parsedFolderPath = parseCardPath(req.body.path);
         if (!parsedFolderPath) {
@@ -662,7 +663,13 @@ router.post('/upload', upload.single('image'), async (req, res) => {
 
         const folderPath = parsedFolderPath.path;
 
-        if (!req.file) {
+        const files = Array.isArray(req.files)
+            ? req.files
+            : req.file
+            ? [req.file]
+            : [];
+
+        if (files.length === 0) {
             logAction(
                 req,
                 'No file uploaded',
@@ -675,74 +682,113 @@ router.post('/upload', upload.single('image'), async (req, res) => {
             });
         }
 
+        // optional backend-side cap if env var provided
+        const rawMaxImages = Number(process.env.MAX_UPLOAD_IMAGES || 0);
+        if (Number.isFinite(rawMaxImages) && rawMaxImages > 0 && files.length > rawMaxImages) {
+            return sendError(res, {
+                httpStatus: 413,
+                status: 'warning',
+                message: `Слишком много файлов. Максимум ${rawMaxImages}`,
+            });
+        }
+
         await ensureCardExists(folderPath);
 
         const isVideo = String(req.body.video || '').toLowerCase();
         const videoFlag = isVideo === 'true';
 
-        const buffer = req.file.buffer;
-        let baseName = makeNumericName(req);
-        if (videoFlag) {
-            baseName = `video_${baseName}`;
-        }
+        const results = [];
 
-        const origExt = path.extname(req.file.originalname) || '.jpg';
-        const originalKey = `${ORIGINAL_ROOT}${folderPath}/${baseName}${origExt}`;
-        const sourceKey = videoFlag
-            ? `${PROCESSING_SOURCE_ROOT}${folderPath}/${baseName}${origExt}`
-            : originalKey;
-        statusKey = `processing/${folderPath}/${baseName}.json`;
-
-        await uploadToS3(buffer, sourceKey);
-
-        await uploadToS3(
-            Buffer.from(
-                JSON.stringify({
-                    status: 'queued',
-                    queuedAt: new Date().toISOString(),
-                }),
-            ),
-            statusKey,
-            'application/json',
-        );
-
-        sendSuccess(res, {
-            httpStatus: 200,
-            status: 'success',
-            message: 'Файл загружен и поставлен в обработку',
-            payload: {
-                success: true,
-                filename: baseName,
-                statusKey,
-            },
-        });
-        logAction(
-            req,
-            'Uploaded new file',
-            `${baseName}
-            #galleryEdit.js #upload`,
-        );
-
-        void (async () => {
+        // process files in order they were sent (multer preserves order)
+        for (const file of files) {
+            let statusKey = null;
             try {
-                await publishPhotoJob({
-                    folderPath,
-                    baseName,
-                    sourceKey,
-                    originalKey: videoFlag ? null : originalKey,
+                const buffer = file.buffer;
+                let baseName = makeNumericName(req);
+                if (videoFlag) {
+                    baseName = `video_${baseName}`;
+                }
+
+                const origExt = path.extname(file.originalname) || '.jpg';
+                const originalKey = `${ORIGINAL_ROOT}${folderPath}/${baseName}${origExt}`;
+                const sourceKey = videoFlag
+                    ? `${PROCESSING_SOURCE_ROOT}${folderPath}/${baseName}${origExt}`
+                    : originalKey;
+                statusKey = `processing/${folderPath}/${baseName}.json`;
+
+                await uploadToS3(buffer, sourceKey);
+
+                await uploadToS3(
+                    Buffer.from(
+                        JSON.stringify({
+                            status: 'queued',
+                            queuedAt: new Date().toISOString(),
+                        }),
+                    ),
                     statusKey,
-                    videoFlag,
-                    cleanupSource: videoFlag,
-                });
-            } catch (publishErr) {
-                console.error('Failed to publish upload job:', publishErr);
+                    'application/json',
+                );
+
+                results.push({ success: true, filename: baseName, statusKey });
+                anyStatusKeys.push(statusKey);
+
+                logAction(
+                    req,
+                    'Uploaded new file',
+                    `${baseName}
+            #galleryEdit.js #upload`,
+                );
+
+                void (async () => {
+                    try {
+                        await publishPhotoJob({
+                            folderPath,
+                            baseName,
+                            sourceKey,
+                            originalKey: videoFlag ? null : originalKey,
+                            statusKey,
+                            videoFlag,
+                            cleanupSource: videoFlag,
+                        });
+                    } catch (publishErr) {
+                        console.error('Failed to publish upload job:', publishErr);
+                        if (statusKey) {
+                            try {
+                                await uploadToS3(
+                                    Buffer.from(
+                                        JSON.stringify({
+                                            status: 'error',
+                                            error: String(publishErr),
+                                            at: new Date().toISOString(),
+                                        }),
+                                    ),
+                                    statusKey,
+                                    'application/json',
+                                );
+                            } catch (statusErr) {
+                                console.error(
+                                    'Failed to write publish error status:',
+                                    statusErr,
+                                );
+                            }
+                        }
+                        logAction(
+                            req,
+                            'Upload publish failed',
+                            `${publishErr}
+                    #galleryEdit.js #upload #publish-error`,
+                        );
+                    }
+                })();
+            } catch (fileErr) {
+                console.error('Upload file error:', fileErr);
                 if (statusKey) {
                     try {
                         await uploadToS3(
                             Buffer.from(
                                 JSON.stringify({
                                     status: 'error',
-                                    error: String(publishErr),
+                                    error: String(fileErr),
                                     at: new Date().toISOString(),
                                 }),
                             ),
@@ -751,23 +797,29 @@ router.post('/upload', upload.single('image'), async (req, res) => {
                         );
                     } catch (statusErr) {
                         console.error(
-                            'Failed to write publish error status:',
+                            'Failed to write upload error status:',
                             statusErr,
                         );
                     }
                 }
-                logAction(
-                    req,
-                    'Upload publish failed',
-                    `${publishErr}
-                    #galleryEdit.js #upload #publish-error`,
-                );
+                results.push({ success: false, error: String(fileErr), statusKey });
             }
-        })();
+        }
+
+        sendSuccess(res, {
+            httpStatus: 200,
+            status: 'success',
+            message: 'Файлы загружены и поставлены в обработку',
+            payload: {
+                files: results,
+            },
+        });
+
         return;
     } catch (err) {
         console.error('Upload route error:', err);
-        if (statusKey) {
+        // try to write error status for any status keys we may have
+        for (const key of anyStatusKeys) {
             try {
                 await uploadToS3(
                     Buffer.from(
@@ -777,14 +829,11 @@ router.post('/upload', upload.single('image'), async (req, res) => {
                             at: new Date().toISOString(),
                         }),
                     ),
-                    statusKey,
+                    key,
                     'application/json',
                 );
             } catch (statusErr) {
-                console.error(
-                    'Failed to write upload error status:',
-                    statusErr,
-                );
+                console.error('Failed to write upload error status:', statusErr);
             }
         }
         if (!res.headersSent) {
