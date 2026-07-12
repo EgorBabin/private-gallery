@@ -332,11 +332,29 @@ router.get('/previews', async (req, res) => {
             });
         }
 
-        const parsedLimit = Number.parseInt(req.query.limit || '200', 10);
-        const limit =
-            Number.isInteger(parsedLimit) && parsedLimit > 0
-                ? Math.min(parsedLimit, 1000)
+        const envDefaultLimit = Number.parseInt(
+            String(process.env.PREVIEWS_DEFAULT_LIMIT || '5000'),
+            10,
+        );
+        const envMaxLimit = Number.parseInt(
+            String(process.env.PREVIEWS_MAX_LIMIT || '0'),
+            10,
+        );
+
+        // resolve requested limit: query -> env default -> 200
+        let requestedLimit = Number.parseInt(String(req.query.limit || ''), 10);
+        if (!Number.isFinite(requestedLimit)) {
+            requestedLimit = Number.isFinite(envDefaultLimit)
+                ? envDefaultLimit
                 : 200;
+        }
+
+        // envMaxLimit === 0 means "no max cap"
+        if (Number.isFinite(envMaxLimit) && envMaxLimit > 0) {
+            requestedLimit = Math.min(requestedLimit, envMaxLimit);
+        }
+
+        const noLimit = requestedLimit === 0; // 0 => disabled (fetch all pages)
         const includeDeletedRequested = String(
             req.query.includeDeleted || '',
         ).trim();
@@ -352,8 +370,27 @@ router.get('/previews', async (req, res) => {
         const continuationToken = req.query.continuationToken;
 
         const fullPrefix = `${PREVIEW_ROOT}${normalizedPrefix}/`;
-        const data = await listObjects(fullPrefix, limit, continuationToken);
-        const contents = data.Contents || [];
+
+        // fetch pages until we collected requestedLimit (unless noLimit === true)
+        const contents = [];
+        let page;
+        let lastContinuation = continuationToken || undefined;
+        if (noLimit) {
+            do {
+                page = await listObjects(fullPrefix, 1000, lastContinuation);
+                contents.push(...(page.Contents || []));
+                lastContinuation = page.IsTruncated ? page.NextContinuationToken || null : null;
+            } while (lastContinuation);
+        } else {
+            let remaining = Math.max(0, Number(requestedLimit));
+            do {
+                const pageSize = Math.min(1000, remaining || 1000);
+                page = await listObjects(fullPrefix, pageSize, lastContinuation);
+                contents.push(...(page.Contents || []));
+                lastContinuation = page.IsTruncated ? page.NextContinuationToken || null : null;
+                remaining = requestedLimit - contents.length;
+            } while (lastContinuation && remaining > 0);
+        }
 
         // Нормализуем префикс — с и без завершающего слэша
         const prefixNoSlash = fullPrefix.replace(/\/+$/, '');
@@ -442,8 +479,8 @@ router.get('/previews', async (req, res) => {
 
         res.json({
             items,
-            isTruncated: !!data.IsTruncated,
-            nextContinuationToken: data.NextContinuationToken || null,
+            isTruncated: !!page.IsTruncated,
+            nextContinuationToken: page.NextContinuationToken || null,
         });
         logAction(req, 'Get previews', '#gallery.js #previews');
     } catch (err) {
