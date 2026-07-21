@@ -5,6 +5,7 @@ import {
     deleteFromS3,
 } from '../utils/s3Client.js';
 import { syncCardByPath } from '../utils/galleryCardSync.js';
+import { addPreviewKey } from '../utils/s3Cache.js';
 import { processGalleryReorderJob } from './galleryReorderJobProcessor.js';
 import { processGallerySoftDeleteJob } from './gallerySoftDeleteJobProcessor.js';
 
@@ -218,6 +219,18 @@ async function processUploadJob(rawPayload) {
                 'Failed to sync card after image processing',
                 syncErr,
             );
+        }
+        // Update Redis cache: add preview entries for uploaded preview keys
+        try {
+            for (const k of uploadedKeys) {
+                if (k && k.startsWith(PREVIEW_ROOT)) {
+                    // folderPath already normalized in job
+                    const item = { key: k, size: 0, lastModified: new Date().toISOString() };
+                    await addPreviewKey(job.folderPath, item);
+                }
+            }
+        } catch (err) {
+            console.error('Failed to update preview cache after upload', err);
         }
     } catch (err) {
         await safeWriteStatus(job.statusKey, {

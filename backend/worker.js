@@ -2,6 +2,7 @@ import 'dotenv/config';
 import { createPhotoConsumerChannel } from './utils/rabbitmq.js';
 import { processPhotoJob } from './workers/photoJobProcessor.js';
 import { startSoftDeleteSweeper } from './workers/softDeleteSweeper.js';
+import { startGalleryCacheRefresher } from './workers/galleryCacheRefresher.js';
 
 const PREFETCH_DEFAULT = 1;
 const rawPrefetch = Number(
@@ -25,6 +26,7 @@ let isShuttingDown = false;
 let activeConnection = null;
 let activeChannel = null;
 let stopSoftDeleteSweeper = null;
+let stopGalleryCacheRefresher = null;
 
 function sleep(ms) {
     return new Promise((resolve) => {
@@ -153,6 +155,13 @@ async function gracefulShutdown(signal) {
             );
         }
     }
+    if (stopGalleryCacheRefresher) {
+        try {
+            await stopGalleryCacheRefresher();
+        } catch (err) {
+            console.error('[photo-worker] Failed to stop gallery cache refresher:', err);
+        }
+    }
     await closeActiveResources();
     process.exit(0);
 }
@@ -166,6 +175,7 @@ process.on('SIGTERM', () => {
 
 async function main() {
     stopSoftDeleteSweeper = startSoftDeleteSweeper();
+    stopGalleryCacheRefresher = startGalleryCacheRefresher();
 
     while (!isShuttingDown) {
         try {

@@ -9,6 +9,11 @@ import {
 } from '../utils/cardsStore.js';
 import path from 'path';
 import { parseSoftDeleteBase } from '../utils/deletionMarker.js';
+import {
+    getPreviewCache,
+    setPreviewCache,
+    addPreviewKey,
+} from '../utils/s3Cache.js';
 
 const router = express.Router();
 
@@ -185,6 +190,18 @@ async function loadCardStatsFromS3(cardPath) {
         return { imageCount: 0, firstImageKey: null };
     }
 
+    // Try Redis cache first (only keys and minimal metadata stored)
+    try {
+        const cached = await getPreviewCache(safePath);
+        if (Array.isArray(cached) && cached.length > 0) {
+            const first = cached.find((i) => i && i.key);
+            return { imageCount: cached.length, firstImageKey: first ? first.key : null };
+        }
+    } catch (err) {
+        void err;
+    }
+
+    // Fallback to S3 scan and then populate Redis cache
     const fullPrefix = `${PREVIEW_ROOT}${safePath}/`;
     const prefixNoSlash = fullPrefix.replace(/\/+$/, '');
     const prefixWithSlash = `${prefixNoSlash}/`;
@@ -192,6 +209,7 @@ async function loadCardStatsFromS3(cardPath) {
     let continuationToken;
     let imageCount = 0;
     let firstImageKey = null;
+    const discovered = [];
 
     do {
         const data = await listObjects(fullPrefix, 1000, continuationToken);
@@ -206,12 +224,19 @@ async function loadCardStatsFromS3(cardPath) {
             if (!firstImageKey) {
                 firstImageKey = key;
             }
+            discovered.push({ key, size: Number(obj.Size) || 0, lastModified: obj.LastModified ? new Date(obj.LastModified).toISOString() : null });
         }
 
         continuationToken = data.IsTruncated
             ? data.NextContinuationToken || null
             : null;
     } while (continuationToken);
+
+    try {
+        await setPreviewCache(safePath, discovered);
+    } catch (err) {
+        void err;
+    }
 
     return { imageCount, firstImageKey };
 }

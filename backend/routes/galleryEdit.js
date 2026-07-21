@@ -21,6 +21,7 @@ import {
     syncCardByPath,
     normalizePreviewInput,
 } from '../utils/galleryCardSync.js';
+import { addPreviewKey } from '../utils/s3Cache.js';
 import {
     buildSoftDeletedBase,
     getSoftDeleteRetentionDays,
@@ -494,6 +495,15 @@ router.post('/cards-admin', async (req, res) => {
         });
 
         const synced = await syncCardByPath(created.path, previewKey);
+        try {
+            if (previewKey) {
+                // previewKey normalized to start with preview/
+                const rel = synced.path; // folder path like '2024/event'
+                await addPreviewKey(rel, { key: previewKey, size: 0, lastModified: new Date().toISOString() });
+            }
+        } catch (err) {
+            void err;
+        }
         const thumbnailUrl = await signPreviewUrl(synced.previewKey);
 
         sendSuccess(res, {
@@ -576,6 +586,13 @@ router.put('/cards-admin/:id', async (req, res) => {
         }
 
         const synced = await syncCardByPath(updated.path, patch.previewKey);
+        try {
+            if (patch.previewKey) {
+                await addPreviewKey(synced.path, { key: patch.previewKey, size: 0, lastModified: new Date().toISOString() });
+            }
+        } catch (err) {
+            void err;
+        }
         const thumbnailUrl = await signPreviewUrl(synced.previewKey);
 
         sendSuccess(res, {
