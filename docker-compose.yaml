@@ -81,6 +81,18 @@ services:
     networks:
       - gallery-net
 
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - gallery-net
+
   backend:
     build:
       context: ./backend
@@ -94,6 +106,8 @@ services:
       postgres:
         condition: service_started
       rabbitmq:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     labels:
       - "traefik.enable=true"
@@ -117,6 +131,8 @@ services:
       postgres:
         condition: service_started
       rabbitmq:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     command: ["npm", "run", "worker"]
     networks:
