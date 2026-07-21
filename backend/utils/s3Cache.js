@@ -2,6 +2,7 @@ import { getRedisClient } from './redisClient.js';
 
 const PREVIEW_KEY_PREFIX = 'gallery:preview:'; // gallery:preview:2024/event
 const DEFAULT_TTL_SEC = Number(process.env.REDIS_CACHE_TTL_SEC || 24 * 60 * 60); // 24h
+const IS_DEBUG_LOGS = (process.env.LOG_LEVEL || '').toLowerCase() === 'debug';
 
 function cacheKeyForPrefix(prefix) {
     // prefix expected like '2024/event' (no leading/trailing slash)
@@ -15,9 +16,14 @@ export async function getPreviewCache(prefix) {
     try {
         const raw = await client.get(key);
         if (!raw) return null;
+        if (IS_DEBUG_LOGS) {
+            console.debug(`[Redis] Cache hit for ${prefix}`);
+        }
         return JSON.parse(raw);
     } catch (err) {
-        console.error('Redis getPreviewCache failed', key, err);
+        if (IS_DEBUG_LOGS) {
+            console.debug(`[Redis] Cache read failed for ${prefix}:`, err.message);
+        }
         return null;
     }
 }
@@ -28,8 +34,13 @@ export async function setPreviewCache(prefix, items) {
     const key = cacheKeyForPrefix(prefix);
     try {
         await client.set(key, JSON.stringify(items || []), 'EX', DEFAULT_TTL_SEC);
+        if (IS_DEBUG_LOGS) {
+            console.debug(`[Redis] Cache set for ${prefix} (${items?.length || 0} items)`);
+        }
     } catch (err) {
-        console.error('Redis setPreviewCache failed', key, err);
+        if (IS_DEBUG_LOGS) {
+            console.debug(`[Redis] Cache write failed for ${prefix}:`, err.message);
+        }
     }
 }
 
@@ -48,7 +59,9 @@ export async function addPreviewKey(prefix, item) {
             await client.set(key, JSON.stringify(list), 'EX', DEFAULT_TTL_SEC);
         }
     } catch (err) {
-        console.error('Redis addPreviewKey failed', key, err);
+        if (IS_DEBUG_LOGS) {
+            console.debug(`[Redis] Add preview key failed for ${prefix}:`, err.message);
+        }
     }
 }
 
@@ -58,8 +71,13 @@ export async function clearPreviewCache(prefix) {
     const key = cacheKeyForPrefix(prefix);
     try {
         await client.del(key);
+        if (IS_DEBUG_LOGS) {
+            console.debug(`[Redis] Cache cleared for ${prefix}`);
+        }
     } catch (err) {
-        console.error('Redis clearPreviewCache failed', key, err);
+        if (IS_DEBUG_LOGS) {
+            console.debug(`[Redis] Cache clear failed for ${prefix}:`, err.message);
+        }
     }
 }
 

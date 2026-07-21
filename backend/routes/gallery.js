@@ -396,117 +396,149 @@ router.get('/previews', async (req, res) => {
 
         const fullPrefix = `${PREVIEW_ROOT}${normalizedPrefix}/`;
 
-        // fetch pages until we collected requestedLimit (unless noLimit === true)
-        const contents = [];
-        let page;
-        let lastContinuation = continuationToken || undefined;
-        if (noLimit) {
-            do {
-                page = await listObjects(fullPrefix, 1000, lastContinuation);
-                contents.push(...(page.Contents || []));
-                lastContinuation = page.IsTruncated ? page.NextContinuationToken || null : null;
-            } while (lastContinuation);
-        } else {
-            let remaining = Math.max(0, Number(requestedLimit));
-            do {
-                const pageSize = Math.min(1000, remaining || 1000);
-                page = await listObjects(fullPrefix, pageSize, lastContinuation);
-                contents.push(...(page.Contents || []));
-                lastContinuation = page.IsTruncated ? page.NextContinuationToken || null : null;
-                remaining = requestedLimit - contents.length;
-            } while (lastContinuation && remaining > 0);
+        // Try Redis cache first
+        let cached = null;
+        try {
+            cached = await getPreviewCache(normalizedPrefix);
+        } catch (err) {
+            if (IS_DEBUG_LOGS) {
+                console.debug('Cache read failed:', err.message);
+            }
         }
 
-        // Нормализуем префикс — с и без завершающего слэша
-        const prefixNoSlash = fullPrefix.replace(/\/+$/, '');
-        const prefixWithSlash = prefixNoSlash + '/';
+        let items = [];
+        let isTruncated = false;
+        let nextContinuationToken = null;
 
-        // Отфильтровываем объекты-папки:
-        const fileContents = contents.filter((obj) => {
-            if (!obj || !obj.Key) {
-                return false;
+        if (Array.isArray(cached) && cached.length > 0) {
+            // Use cached keys (no presigned URLs stored in cache)
+            const take = noLimit ? cached.length : Math.min(requestedLimit, cached.length);
+            const slice = cached.slice(0, take);
+
+            const mappedItems = await Promise.all(
+                slice.map(async (obj) => {
+                    const key = obj.key;
+                    const baseWithExt = path.posix.basename(key);
+                    const ext = path.posix.extname(baseWithExt);
+                    const rawBase = ext ? baseWithExt.slice(0, -ext.length) : baseWithExt;
+                    const softDeleteMeta = parseSoftDeleteBase(rawBase);
+
+                    if (softDeleteMeta && !includeDeleted) return null;
+
+                    const displayBase = softDeleteMeta?.originalBase || String(rawBase || '');
+                    const idx = parseNumericIndexFromBase(displayBase) ?? 0;
+                    const isVideo = displayBase.startsWith('video_');
+                    const name = isVideo ? displayBase.replace(/^video_/, '') : displayBase;
+
+                    const url = await getSignedUrlForKey(key, 60 * 5, { skipHead: true }).catch(() => null);
+
+                    const deleteDueAt = softDeleteMeta?.deleteAt || null;
+                    const deleteDaysLeft = deleteDueAt
+                        ? Math.max(0, Math.ceil((deleteDueAt.getTime() - Date.now()) / (24 * 60 * 60 * 1000)))
+                        : null;
+
+                    return {
+                        key,
+                        url,
+                        index: idx,
+                        size: obj.size || 0,
+                        lastModified: obj.lastModified || null,
+                        isVideo,
+                        name,
+                        isPendingDeletion: Boolean(softDeleteMeta),
+                        deleteDueAt: deleteDueAt ? deleteDueAt.toISOString() : null,
+                        deleteDaysLeft,
+                    };
+                }),
+            );
+
+            items = mappedItems.filter(Boolean);
+            items.sort((a, b) => a.index - b.index);
+            isTruncated = false;
+        } else {
+            // No cache: fallback to S3 scan and populate cache
+            const contents = [];
+            let page;
+            let lastContinuation = continuationToken || undefined;
+            if (noLimit) {
+                do {
+                    page = await listObjects(fullPrefix, 1000, lastContinuation);
+                    contents.push(...(page.Contents || []));
+                    lastContinuation = page.IsTruncated ? page.NextContinuationToken || null : null;
+                } while (lastContinuation);
+            } else {
+                let remaining = Math.max(0, Number(requestedLimit));
+                do {
+                    const pageSize = Math.min(1000, remaining || 1000);
+                    page = await listObjects(fullPrefix, pageSize, lastContinuation);
+                    contents.push(...(page.Contents || []));
+                    lastContinuation = page.IsTruncated ? page.NextContinuationToken || null : null;
+                    remaining = requestedLimit - contents.length;
+                } while (lastContinuation && remaining > 0);
             }
-            if (obj.Key === prefixNoSlash || obj.Key === prefixWithSlash) {
+
+            const prefixNoSlash = fullPrefix.replace(/\/+$/, '');
+            const prefixWithSlash = prefixNoSlash + '/';
+
+            const fileContents = contents.filter((obj) => {
+                if (!obj || !obj.Key) return false;
+                if (obj.Key === prefixNoSlash || obj.Key === prefixWithSlash) return false;
+                if (obj.Key.endsWith('/')) return false;
+                return true;
+            });
+
+            // populate cache with minimal metadata
+            try {
+                const discovered = fileContents.map((obj) => ({ key: obj.Key, size: Number(obj.Size) || 0, lastModified: obj.LastModified ? new Date(obj.LastModified).toISOString() : null }));
+                await setPreviewCache(normalizedPrefix, discovered);
+            } catch (err) {
                 if (IS_DEBUG_LOGS) {
-                    console.debug(
-                        'Skipping folder placeholder object from S3:',
-                        obj.Key,
-                    );
+                    console.debug('Cache write failed:', err.message);
                 }
-                return false;
             }
-            if (obj.Key.endsWith('/')) {
-                if (IS_DEBUG_LOGS) {
-                    console.debug(
-                        'Skipping directory-like key from S3:',
-                        obj.Key,
-                    );
-                }
-                return false;
-            }
-            return true;
-        });
 
-        // преобразуем в объекты с индексом и url (вызываем signed url только для реальных файлов)
-        const mappedItems = await Promise.all(
-            fileContents.map(async (obj) => {
-                const baseWithExt = path.posix.basename(obj.Key); // e.g. "video_12345.webp" or "12345.webp"
-                const ext = path.posix.extname(baseWithExt);
-                const rawBase = ext
-                    ? baseWithExt.slice(0, -ext.length)
-                    : baseWithExt;
-                const softDeleteMeta = parseSoftDeleteBase(rawBase);
+            const mappedItems = await Promise.all(
+                fileContents.map(async (obj) => {
+                    const baseWithExt = path.posix.basename(obj.Key);
+                    const ext = path.posix.extname(baseWithExt);
+                    const rawBase = ext ? baseWithExt.slice(0, -ext.length) : baseWithExt;
+                    const softDeleteMeta = parseSoftDeleteBase(rawBase);
 
-                if (softDeleteMeta && !includeDeleted) {
-                    return null;
-                }
+                    if (softDeleteMeta && !includeDeleted) return null;
 
-                const displayBase =
-                    softDeleteMeta?.originalBase || String(rawBase || '');
-                const idx = parseNumericIndexFromBase(displayBase) ?? 0;
-                const isVideo = displayBase.startsWith('video_');
-                const name = isVideo
-                    ? displayBase.replace(/^video_/, '')
-                    : displayBase;
+                    const displayBase = softDeleteMeta?.originalBase || String(rawBase || '');
+                    const idx = parseNumericIndexFromBase(displayBase) ?? 0;
+                    const isVideo = displayBase.startsWith('video_');
+                    const name = isVideo ? displayBase.replace(/^video_/, '') : displayBase;
 
-                const url = await getSignedUrlForKey(obj.Key, 60 * 5, {
-                    skipHead: true,
-                });
+                    const url = await getSignedUrlForKey(obj.Key, 60 * 5, { skipHead: true }).catch(() => null);
 
-                const deleteDueAt = softDeleteMeta?.deleteAt || null;
-                const deleteDaysLeft = deleteDueAt
-                    ? Math.max(
-                          0,
-                          Math.ceil(
-                              (deleteDueAt.getTime() - Date.now()) /
-                                  (24 * 60 * 60 * 1000),
-                          ),
-                      )
-                    : null;
+                    const deleteDueAt = softDeleteMeta?.deleteAt || null;
+                    const deleteDaysLeft = deleteDueAt
+                        ? Math.max(0, Math.ceil((deleteDueAt.getTime() - Date.now()) / (24 * 60 * 60 * 1000)))
+                        : null;
 
-                return {
-                    key: obj.Key,
-                    url,
-                    index: idx,
-                    size: obj.Size,
-                    lastModified: obj.LastModified,
-                    isVideo, // video preview
-                    name,
-                    isPendingDeletion: Boolean(softDeleteMeta),
-                    deleteDueAt: deleteDueAt ? deleteDueAt.toISOString() : null,
-                    deleteDaysLeft,
-                };
-            }),
-        );
-        const items = mappedItems.filter(Boolean);
+                    return {
+                        key: obj.Key,
+                        url,
+                        index: idx,
+                        size: obj.Size,
+                        lastModified: obj.LastModified,
+                        isVideo,
+                        name,
+                        isPendingDeletion: Boolean(softDeleteMeta),
+                        deleteDueAt: deleteDueAt ? deleteDueAt.toISOString() : null,
+                        deleteDaysLeft,
+                    };
+                }),
+            );
+            items = mappedItems.filter(Boolean);
+            items.sort((a, b) => a.index - b.index);
+            isTruncated = !!page.IsTruncated;
+            nextContinuationToken = page.NextContinuationToken || null;
+        }
 
-        items.sort((a, b) => a.index - b.index);
-
-        res.json({
-            items,
-            isTruncated: !!page.IsTruncated,
-            nextContinuationToken: page.NextContinuationToken || null,
-        });
+        res.json({ items, isTruncated, nextContinuationToken });
         logAction(req, 'Get previews', '#gallery.js #previews');
     } catch (err) {
         console.error('previews error', err);
