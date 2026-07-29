@@ -1,109 +1,109 @@
 # Private Gallery
 
-[English version](README.en.md)
+[Русская версия](README.ru.md)
 
-**Личная медиагалерея, которую вы контролируете полностью.**
+**A personal media gallery you fully control.**
 
-Фото, видео, папки, пользователи и доступы - на вашем сервере, в вашем хранилище, по вашим правилам. Без публичных фотоплатформ, без привязки к чужому облаку, без лишнего шума.
+Photos, videos, folders, users and access rules live on your server, in your storage, under your rules. No public photo platform, no consumer-cloud lock-in, no extra noise.
 
-Private Gallery родилась как проект для себя: быстрый, закрытый и удобный архив личных медиа. Сейчас это уже хорошая основа для кастомного решения под клиента: семейной галереи, закрытого портфолио, личного архива, приватной медиатеки или self-hosted продукта для небольшой команды.
+Private Gallery started as a tool for my own media archive: fast, private and comfortable to use every day. It has grown into a strong base for client work: family galleries, closed portfolios, personal archives, private media libraries or a self-hosted product for a small team.
 
-## Зачем
+## Why It Matters
 
-Обычные фотосервисы удобны, пока вы согласны жить внутри их правил. Private Gallery решает другую задачу: дать владельцу красивый интерфейс и полный контроль над данными.
+Mainstream photo services are convenient as long as you accept their rules. Private Gallery solves a different problem: it gives the owner a polished interface and real control over the data.
 
-- Храните медиа в S3-compatible storage, который выбираете сами.
-- Показывайте фото и видео только авторизованным пользователям.
-- Управляйте папками, пользователями и порядком контента из админки.
-- Открывайте оригиналы через временные signed URLs.
-- Деплойте проект на свой сервер через Docker Compose.
+- Store media in the S3-compatible storage you choose.
+- Show photos and videos only to authenticated users.
+- Manage folders, users and content order from an admin UI.
+- Open originals through short-lived signed URLs.
+- Deploy the app on your own server with Docker Compose.
 
-## Что Уже Есть
+## What It Includes
 
-### Галерея Для Фото И Видео
+### Photo And Video Gallery
 
-Карточки папок на главной, masonry-витрина внутри папки, лайтбокс на Swiper, keyboard navigation, HD-кнопка для оригинала и воспроизведение видео через подготовленные S3-варианты.
+Folder cards on the home page, a masonry view inside each folder, a Swiper lightbox, keyboard navigation, an HD button for originals and video playback through prepared S3 variants.
 
-### Приватность По Умолчанию
+### Privacy By Default
 
-Сессии в PostgreSQL, HTTP-only secure cookies, CSRF-защита, роли `user` / `admin`, проверка приватных API routes, Telegram и Yandex login для заранее добавленных пользователей.
+PostgreSQL-backed sessions, HTTP-only secure cookies, CSRF protection, `user` / `admin` roles, private API checks, Telegram and Yandex login for pre-approved users.
 
-### Админка, Которая Закрывает Реальные Сценарии
+### Admin Workflows That Cover Real Use
 
-Можно создавать и редактировать папки, менять обложки, управлять пользователями, загружать новые изображения, отмечать preview для видео, менять порядок медиа drag-and-drop и удалять контент без ручной работы с файлами.
+Create and edit folders, change covers, manage users, upload new images, mark a preview as video, reorder media with drag-and-drop and remove content without touching files manually.
 
-### Умная Работа С Медиа
+### Smart Media Handling
 
-Оригиналы остаются отдельно, а для просмотра создаются легкие WebP-версии: `preview`, `screen-1280`, `screen-1920`, `screen-2560`. Галерея использует local cache, чтобы быстрее показывать уже открытые папки.
+Originals stay separate, while lightweight WebP display versions are generated for `preview`, `screen-1280`, `screen-1920` and `screen-2560`. The gallery uses local cache to show previously opened folders faster.
 
-### Безопасное Удаление
+### Safe Deletion
 
-Удаление работает мягко: медиа скрывается из галереи, остается доступным в edit mode, может быть восстановлено и удаляется окончательно только после retention period. Есть отдельный экран со всеми файлами, ожидающими удаления.
+Deletion is soft first: media is hidden from the gallery, remains visible in edit mode, can be restored and is removed permanently only after the retention period. There is a dedicated screen for all files waiting for cleanup.
 
-### Фоновая Обработка
+### Background Processing
 
-Загрузка, сортировка и soft delete уходят в RabbitMQ workers. Reorder не просто меняет UI: система переименовывает связанные S3-версии, проверяет hash и показывает статус выполнения.
+Uploads, reorder operations and soft delete tasks run through RabbitMQ workers. Reorder is more than a UI shuffle: the system renames related S3 variants, verifies hashes and exposes processing status.
 
-## Почему Это Сильная Основа Для Клиента
+## Why It Works Well For Clients
 
-Private Gallery закрывает не только красивый просмотр, но и владение системой целиком. Клиент получает понятный продукт: private-first галерею, которую можно развернуть, адаптировать под бренд, расширить под нужный workflow и не зависеть от потребительских облачных фотосервисов.
+Private Gallery covers both the viewing experience and ownership of the system. A client gets a clear product: a private-first gallery that can be deployed, branded, customized around a workflow and kept independent from consumer photo-cloud platforms.
 
-Проект уже содержит то, что обычно приходится дописывать после первого демо: авторизацию, роли, админку, хранение, оптимизированные версии файлов, фоновые задачи, мягкое удаление и repeatable deploy.
+The project already includes the pieces that usually appear after the first demo: authentication, roles, admin screens, storage, optimized media versions, background jobs, soft deletion and repeatable deployment.
 
-## Скриншоты
+## Screenshots
 
 <table>
   <tr>
     <td width="50%">
-      <img src="frontend/img/home.png" alt="Главная страница с карточками папок" />
+      <img src="frontend/img/home.png" alt="Home page with folder cards" />
       <br />
-      <sub><strong>Главная.</strong> Папки с обложками, годами и счетчиком медиа.</sub>
+      <sub><strong>Home.</strong> Folders with covers, years and media count.</sub>
     </td>
     <td width="50%">
-      <img src="frontend/img/page.png" alt="Страница папки с медиавитриной" />
+      <img src="frontend/img/page.png" alt="Folder page with media grid" />
       <br />
-      <sub><strong>Папка.</strong> Быстрая masonry-витрина для просмотра коллекции.</sub>
-    </td>
-  </tr>
-  <tr>
-    <td width="50%">
-      <img src="frontend/img/box.png" alt="Лайтбокс для фото" />
-      <br />
-      <sub><strong>Фото.</strong> Лайтбокс со слайдером и открытием оригинала.</sub>
-    </td>
-    <td width="50%">
-      <img src="frontend/img/boxvideo.png" alt="Лайтбокс для видео" />
-      <br />
-      <sub><strong>Видео.</strong> Просмотр видео через приватные signed URLs.</sub>
+      <sub><strong>Folder.</strong> Fast masonry view for browsing a collection.</sub>
     </td>
   </tr>
   <tr>
     <td width="50%">
-      <img src="frontend/img/editpage.png" alt="Редактирование папки" />
+      <img src="frontend/img/box.png" alt="Photo lightbox" />
       <br />
-      <sub><strong>Редактор папки.</strong> Upload, preview, сортировка и удаление.</sub>
+      <sub><strong>Photo.</strong> Lightbox with slider navigation and original access.</sub>
     </td>
     <td width="50%">
-      <img src="frontend/img/edithome.png" alt="Админка папок" />
+      <img src="frontend/img/boxvideo.png" alt="Video lightbox" />
       <br />
-      <sub><strong>Папки.</strong> Создание, порядок, обложки и названия.</sub>
+      <sub><strong>Video.</strong> Private playback through signed media URLs.</sub>
     </td>
   </tr>
   <tr>
     <td width="50%">
-      <img src="frontend/img/admin.png" alt="Админка пользователей" />
+      <img src="frontend/img/editpage.png" alt="Folder editor" />
       <br />
-      <sub><strong>Пользователи.</strong> Email, Telegram ID и роли доступа.</sub>
+      <sub><strong>Folder editor.</strong> Upload, preview, ordering and delete controls.</sub>
     </td>
     <td width="50%">
-      <img src="frontend/img/editdelpage.png" alt="Медиа под удалением" />
+      <img src="frontend/img/edithome.png" alt="Folder admin" />
       <br />
-      <sub><strong>Soft delete.</strong> Все файлы, ожидающие финального удаления.</sub>
+      <sub><strong>Folders.</strong> Create, order, cover and rename galleries.</sub>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%">
+      <img src="frontend/img/admin.png" alt="User admin" />
+      <br />
+      <sub><strong>Users.</strong> Email, Telegram ID and access roles.</sub>
+    </td>
+    <td width="50%">
+      <img src="frontend/img/editdelpage.png" alt="Pending deletion media" />
+      <br />
+      <sub><strong>Soft delete.</strong> Files waiting for final cleanup.</sub>
     </td>
   </tr>
 </table>
 
-## Под Капотом
+## Under The Hood
 
 ```text
 Browser
@@ -120,16 +120,16 @@ Traefik / HTTPS
         +-- RabbitMQ -> worker: upload, reorder, soft delete
 ```
 
-## Стек
+## Stack
 
 - **Frontend:** React 19, Vite, React Router, Swiper, React Responsive Masonry, DnD Kit, Lucide React, Sileo.
 - **Backend:** Node.js, Express 5, PostgreSQL, `express-session`, `connect-pg-simple`, `csurf`, Helmet, Multer, Sharp.
 - **Storage & jobs:** S3-compatible storage, signed URLs, RabbitMQ workers.
 - **Infra:** Docker Compose, Traefik, Nginx, PostgreSQL, RabbitMQ.
 
-## Хранение Медиа
+## Media Storage
 
-Фото:
+Photos:
 
 ```text
 original_photo/{year}/{category}/{name}.{ext}
@@ -139,7 +139,7 @@ screen-1920/{year}/{category}/{name}.webp
 screen-2560/{year}/{category}/{name}.webp
 ```
 
-Видео:
+Videos:
 
 ```text
 preview/{year}/{category}/video_{name}.webp
@@ -148,9 +148,9 @@ video_1080/{year}/{category}/{name}.mp4
 video_720/{year}/{category}/{name}.mp4
 ```
 
-Видео-воспроизведение рассчитано на уже подготовленные MP4-варианты в S3-compatible storage. Сценарий загрузки в админке может загрузить preview image и отметить его как видео.
+Video playback expects prepared MP4 variants in S3-compatible storage. The admin upload flow can upload a preview image and mark it as a video item.
 
-## Деплой На Ubuntu 24.04
+## Deploy On Ubuntu 24.04
 
 ### 1. Docker
 
@@ -180,7 +180,7 @@ sudo systemctl start docker
 sudo systemctl enable docker
 ```
 
-### 2. Проект
+### 2. Project
 
 ```bash
 sudo apt install -y git
@@ -191,32 +191,32 @@ cd private-gallery
 ls -a
 ```
 
-### 3. Переменные Окружения
+### 3. Environment
 
 ```bash
 cp .env.example .env
 nano .env
 ```
 
-Заполните основные значения:
+Fill in the main values:
 
-- `SERVER_NAME`, `LE_EMAIL`, `FRONTEND_URL` - домен и HTTPS.
-- `SESSION`, `SESSION_SECRET` - сессии.
+- `SERVER_NAME`, `LE_EMAIL`, `FRONTEND_URL` - domain and HTTPS.
+- `SESSION`, `SESSION_SECRET` - sessions.
 - `S3_BUCKET`, `S3_REGION`, `S3_ENDPOINT`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` - S3-compatible storage.
 - `PG_USER`, `PG_PASSWORD`, `PG_HOST`, `PG_PORT`, `PG_DATABASE` - PostgreSQL.
-- `RABBITMQ_*` - очередь фоновых задач.
-- `APP_INIT_*` - первый пользователь.
+- `RABBITMQ_*` - background job queue.
+- `APP_INIT_*` - first user.
 - `YANDEX_*` - Yandex OAuth.
-- `VITE_TG_BOT_USERNAME`, `TG_BOT_TOKEN`, `TG_CHAT_ID` - Telegram login и уведомления.
+- `VITE_TG_BOT_USERNAME`, `TG_BOT_TOKEN`, `TG_CHAT_ID` - Telegram login and notifications.
 
-### 4. Права Docker
+### 4. Docker Permissions
 
 ```bash
 sudo usermod -aG docker [your_linux_username]
 newgrp docker
 ```
 
-### 5. Запуск
+### 5. Start
 
 ```bash
 docker compose build
@@ -224,22 +224,22 @@ docker compose up -d
 docker compose ps -a
 ```
 
-Логи:
+Logs:
 
 ```bash
 docker compose up
 ```
 
-## Для Кого
+## Who It Fits
 
-- Личная self-hosted галерея.
-- Семейный или travel archive.
-- Закрытое портфолио.
-- Private client preview для фотографов, дизайнеров и студий.
-- База для кастомного media-management решения.
+- Personal self-hosted gallery.
+- Family or travel archive.
+- Closed portfolio.
+- Private client preview for photographers, designers and studios.
+- Base for a custom media-management product.
 
-## Лицензия
+## Open Source
 
-Проект опубликован под MIT License. См. [LICENSE](LICENSE).
+The project is released under the MIT License. See [LICENSE](LICENSE).
 
 # Made with ❤️
