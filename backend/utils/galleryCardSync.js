@@ -1,4 +1,4 @@
-import { listObjects } from './s3Client.js';
+import { refreshFolderPreviews } from './folderListing.js';
 import path from 'path';
 import {
     getCardByPath,
@@ -40,41 +40,37 @@ export function normalizePreviewInput(rawPreviewKey) {
         : `${PREVIEW_ROOT}${normalized}`;
 }
 
+/** Число видимых (не удалённых) медиа и первый ключ по листингу preview. */
+export function computeCardStats(folderPath, previewItems) {
+    const fullPrefix = `${PREVIEW_ROOT}${folderPath}/`;
+    const prefixNoSlash = fullPrefix.replace(/\/+$/, '');
+
+    let imageCount = 0;
+    let firstImageKey = null;
+    for (const item of previewItems || []) {
+        const key = item?.key;
+        if (!isImageKey(key, prefixNoSlash, fullPrefix)) {
+            continue;
+        }
+        imageCount += 1;
+        if (!firstImageKey) {
+            firstImageKey = key;
+        }
+    }
+
+    return { imageCount, firstImageKey };
+}
+
+// Вызывается после любого изменения папки (через syncCardByPath),
+// поэтому заодно обновляет кэш листинга и сбрасывает индекс медиа.
 export async function loadCardStatsFromS3(cardPath) {
     const parsedPath = parseCardPath(cardPath);
     if (!parsedPath) {
         throw new Error('Invalid path format. Use "year/category"');
     }
 
-    const fullPrefix = `${PREVIEW_ROOT}${parsedPath.path}/`;
-    const prefixNoSlash = fullPrefix.replace(/\/+$/, '');
-    const prefixWithSlash = `${prefixNoSlash}/`;
-
-    let continuationToken = null;
-    let imageCount = 0;
-    let firstImageKey = null;
-
-    do {
-        const page = await listObjects(fullPrefix, 1000, continuationToken);
-        const contents = page.Contents || [];
-
-        for (const item of contents) {
-            const key = item?.Key;
-            if (!isImageKey(key, prefixNoSlash, prefixWithSlash)) {
-                continue;
-            }
-            imageCount += 1;
-            if (!firstImageKey) {
-                firstImageKey = key;
-            }
-        }
-
-        continuationToken = page.IsTruncated
-            ? page.NextContinuationToken || null
-            : null;
-    } while (continuationToken);
-
-    return { imageCount, firstImageKey };
+    const items = await refreshFolderPreviews(parsedPath.path);
+    return computeCardStats(parsedPath.path, items);
 }
 
 export async function ensureCardExists(rawPath) {

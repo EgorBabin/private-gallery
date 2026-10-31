@@ -1,32 +1,148 @@
-.div {
+.page {
+  min-height: 70dvh;
   display: flex;
-  gap: 12px;
   align-items: center;
-  flex-wrap: wrap;
+  justify-content: center;
+  padding: 24px 16px 120px;
+  box-sizing: border-box;
+}
+
+.card {
   width: 100%;
-  max-width: 480px;
-  margin: 6px 0;
+  max-width: 380px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 28px 24px;
+  /* корневой шрифт проекта 2rem (32px), поэтому здесь размеры в px */
+  font-size: 16px;
+  line-height: 1.4;
+  border-radius: 16px;
+  border: 1px solid var(--color-border);
+  background: linear-gradient(
+    180deg,
+    var(--color-panel-top-glow),
+    var(--color-panel-bottom-soft)
+  );
+  box-shadow: 0 8px 24px var(--color-panel-shadow);
+  box-sizing: border-box;
+}
+
+.title {
+  margin: 0;
+  font-size: 22px;
+  line-height: 1.25;
+  text-align: center;
+}
+
+.subtitle {
+  margin: -8px 0 4px;
+  text-align: center;
+  font-size: 14px;
+  color: var(--color-text-secondary);
+}
+
+.error {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: 14px;
+  color: var(--color-text-primary);
+  background: var(--color-login-error-bg);
+  border: 1px solid var(--color-login-error-border);
+}
+
+.buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* обе кнопки одинаковой фиксированной высоты: ничего не сдвигается при загрузке */
+.button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  height: 48px;
+  padding: 0 16px;
+  border-radius: 12px;
+  border: 1px solid var(--color-button-border-dark);
+  box-sizing: border-box;
+  font: inherit;
+  font-weight: 700;
+  font-size: 16px;
+  color: var(--color-text-primary);
+  text-decoration: none;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    transform 0.12s ease,
+    opacity 0.12s ease;
+}
+
+.button:active {
+  transform: scale(0.98);
+}
+
+.button:focus-visible {
+  outline: 2px solid var(--accent-1);
+  outline-offset: 2px;
+}
+
+.button:disabled,
+.button[aria-disabled='true'] {
+  cursor: default;
+  opacity: 0.7;
+}
+
+.telegram {
+  background: var(--color-login-btn-telegram);
+  box-shadow: 0 6px 16px var(--color-button-shadow-telegram);
+}
+
+.yandex {
+  background: var(--color-login-btn-yandex);
+  box-shadow: 0 6px 16px var(--color-button-shadow-yandex);
+}
+
+@media (any-hover: hover) {
+  .button:not(:disabled):not([aria-disabled='true']):hover {
+    opacity: 0.92;
+  }
+}
+
+.icon {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+}
+
+.yandexMark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--color-text-primary);
+  color: var(--color-login-btn-yandex);
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1;
+  flex: 0 0 auto;
 }
 
 .checkbox {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 10px;
-  padding: 8px 12px;
-  border-radius: 10px;
-  background: linear-gradient(
-    180deg,
-    var(--color-panel-top-glow),
-    var(--color-panel-bottom-glow)
-  );
-  border: 1px solid var(--color-border);
-  color: var(--color-text-primary);
-  font-size: 0.95rem;
+  font-size: 15px;
+  color: var(--color-text-secondary);
   cursor: pointer;
   user-select: none;
-  transition:
-    transform 0.08s ease,
-    box-shadow 0.12s ease;
 }
 
 .checkbox input[type='checkbox'] {
@@ -35,110 +151,4 @@
   margin: 0;
   accent-color: var(--accent-1);
   cursor: pointer;
-  flex: 0 0 auto;
-  border-radius: 4px;
-  box-shadow: 0 2px 6px var(--color-input-inset-shadow) inset;
-}
-
-.checkbox:active {
-  transform: translateY(1px);
-}
-.checkbox:focus-within {
-  box-shadow: 0 6px 20px var(--color-users-box-shadow-focus);
-}
-
-.telegram {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 8px 14px;
-  border-radius: 10px;
-  border: 1px solid var(--color-border);
-  background: linear-gradient(
-    180deg,
-    var(--color-panel-top-glow),
-    var(--color-panel-bottom-soft)
-  );
-  min-width: 110px;
-  text-align: center;
-  box-shadow: 0 8px 24px var(--color-panel-shadow);
-}
-
-.telegram a,
-.telegram > a {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  text-decoration: none;
-  padding: 8px 12px;
-  border-radius: 8px;
-  background: var(--color-login-btn-telegram);
-  color: var(--color-text-primary);
-  font-weight: 700;
-  box-shadow: 0 8px 20px var(--color-button-shadow-telegram);
-  transition:
-    transform 0.12s ease,
-    box-shadow 0.12s ease,
-    opacity 0.12s ease;
-}
-
-.telegram a:hover {
-  transform: translateY(-2px);
-}
-.telegram a:active {
-  transform: translateY(0);
-  opacity: 0.95;
-}
-
-.yandex {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 8px 14px;
-  border-radius: 10px;
-  text-decoration: none;
-  background: var(--color-login-btn-yandex);
-  color: var(--color-text-primary);
-  font-weight: 700;
-  border: 1px solid var(--color-button-border-dark);
-  box-shadow: 0 8px 20px var(--color-button-shadow-yandex);
-  transition:
-    transform 0.12s ease,
-    box-shadow 0.12s ease,
-    opacity 0.12s ease;
-  min-width: 90px;
-}
-
-.yandex:hover {
-  transform: translateY(-2px);
-}
-.yandex:active {
-  transform: translateY(0);
-  opacity: 0.95;
-}
-
-.telegram > .telegram-widget,
-.telegram > iframe,
-.telegram > div {
-  width: 100%;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-}
-
-@media (max-width: 520px) {
-  .div {
-    gap: 8px;
-  }
-  .telegram,
-  .yandex,
-  .checkbox {
-    flex: 1 1 auto;
-    justify-content: center;
-  }
-  .telegram a,
-  .yandex {
-    width: 100%;
-    justify-content: center;
-  }
 }

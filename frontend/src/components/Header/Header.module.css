@@ -30,12 +30,11 @@
   width: clamp(120px, 70%, 300px);
   border-radius: 0.7rem;
 
-  background-color: var(--color-header-bg);
+  /* без backdrop-filter: размытие поверх прокручиваемых фото сильно
+     нагружает GPU телефона */
+  background-color: var(--color-header-bg-solid);
   border: 2px solid var(--color-transparent);
   box-shadow: 0 10px 32px var(--color-header-bg);
-
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
 }
 
 header svg {

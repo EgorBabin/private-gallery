@@ -1,0 +1,13 @@
+# Контекст сборки caddy (корень репозитория): нужны только frontend и caddy.
+# .env не нужен: публичные VITE_* передаются через build args
+.git
+.env
+.env.*
+**/node_modules
+**/dist
+**/*.log
+backend
+db
+frontend/img
+README*.md
+LICENSE

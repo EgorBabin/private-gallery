@@ -42,7 +42,7 @@ Deletion is soft first: media is hidden from the gallery, remains visible in edi
 
 ### Background Processing
 
-Uploads, reorder operations and soft delete tasks run through RabbitMQ workers. Reorder is more than a UI shuffle: the system renames related S3 variants, verifies hashes and exposes processing status.
+Uploads, reorder operations and soft delete tasks run in a background worker through a PostgreSQL job queue. Reorder is more than a UI shuffle: the system renames related S3 variants, verifies hashes and exposes processing status.
 
 ## Why It Works Well For Clients
 
@@ -109,23 +109,24 @@ The project already includes the pieces that usually appear after the first demo
 Browser
   |
   v
-Traefik / HTTPS
+Caddy / HTTPS (Let's Encrypt)
   |
-  +-- Nginx -> React frontend
+  +-- React frontend (static files)
   |
-  +-- Express API
+  +-- /api -> Express API
         |
-        +-- PostgreSQL: users, sessions, cards
+        +-- PostgreSQL: users, sessions, cards, media dimensions
+        +-- Redis: folder listing and media index cache
         +-- S3-compatible storage: originals, previews, videos
-        +-- RabbitMQ -> worker: upload, reorder, soft delete
+        +-- PostgreSQL job queue -> worker: upload, reorder, soft delete
 ```
 
 ## Stack
 
-- **Frontend:** React 19, Vite, React Router, Swiper, React Responsive Masonry, DnD Kit, Lucide React, Sileo.
-- **Backend:** Node.js, Express 5, PostgreSQL, `express-session`, `connect-pg-simple`, `csurf`, Helmet, Multer, Sharp.
-- **Storage & jobs:** S3-compatible storage, signed URLs, RabbitMQ workers.
-- **Infra:** Docker Compose, Traefik, Nginx, PostgreSQL, RabbitMQ.
+- **Frontend:** React 19, Vite, React Router, Swiper, DnD Kit, Lucide React, Sileo.
+- **Backend:** Node.js, Express 5, PostgreSQL, `express-session`, `connect-pg-simple`, CSRF (HMAC token + Origin), Helmet, Multer, Sharp.
+- **Storage & jobs:** S3-compatible storage, signed URLs, Redis cache, PostgreSQL job queue.
+- **Infra:** Docker Compose, Caddy, PostgreSQL, Redis.
 
 ## Media Storage
 
@@ -200,14 +201,13 @@ nano .env
 
 Fill in the main values:
 
-- `SERVER_NAME`, `LE_EMAIL`, `FRONTEND_URL` - domain and HTTPS.
+- `SERVER_NAME`, `LE_EMAIL`, `FRONTEND_URL` - domain and HTTPS (Caddy issues the certificate, ports 80 and 443 must be open).
 - `SESSION`, `SESSION_SECRET` - sessions.
 - `S3_BUCKET`, `S3_REGION`, `S3_ENDPOINT`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` - S3-compatible storage.
 - `PG_USER`, `PG_PASSWORD`, `PG_HOST`, `PG_PORT`, `PG_DATABASE` - PostgreSQL.
-- `RABBITMQ_*` - background job queue.
 - `APP_INIT_*` - first user.
 - `YANDEX_*` - Yandex OAuth.
-- `VITE_TG_BOT_USERNAME`, `TG_BOT_TOKEN`, `TG_CHAT_ID` - Telegram login and notifications.
+- `TG_BOT_TOKEN`, `TG_CHAT_ID` - Telegram login and notifications. Set the site domain for the bot in BotFather with `/setdomain`.
 
 ### 4. Docker Permissions
 
@@ -227,8 +227,34 @@ docker compose ps -a
 Logs:
 
 ```bash
-docker compose up
+docker compose logs -f --tail=200 backend photo-worker
 ```
+
+Container logs are rotated automatically (up to 3 files of 10 MB per container), every service has a memory limit and `photo-worker` also has a CPU limit. Defaults can be changed in `.env` (the `container resource limits` block).
+
+### 6. Update
+
+```bash
+git pull
+docker compose build
+docker compose up -d
+docker image prune -f
+docker builder prune -f
+```
+
+The last two commands remove old images and build cache. Without them every rebuild leaves hundreds of megabytes on disk.
+
+> **Moving from the Traefik + nginx + RabbitMQ version.** Update when no uploads are being processed: jobs from the old RabbitMQ queue are not carried over. Old containers are removed with `--remove-orphans`, and Caddy issues a new certificate on first start:
+>
+> ```bash
+> docker compose up -d --build --remove-orphans
+> docker volume rm private-gallery_rabbitmqdata private-gallery_traefik-letsencrypt
+> ```
+
+### 7. Privacy
+
+- Caddy sends a Content-Security-Policy, `Referrer-Policy: strict-origin-when-cross-origin` (S3 and other sites only see the domain, not folder names) and `X-Robots-Tag: noindex`. Set `S3_PUBLIC_ORIGIN` in `.env` so images and video are allowed only from your storage.
+- Sessions are not bound to the IP (`SESSION_BIND_IP=false`), otherwise phones get logged out when switching networks. CSRF protection: an HMAC session token plus an `Origin` check. The API is rate limited per IP.
 
 ## Who It Fits
 

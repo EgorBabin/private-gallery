@@ -1,0 +1,48 @@
+# Caddy заменяет Traefik + nginx: HTTPS-сертификат Let's Encrypt,
+# редирект с http, раздача собранного фронтенда и прокси /api на backend.
+{
+	email {$LE_EMAIL}
+	# API управления Caddy не нужен: конфиг меняется только пересборкой
+	admin off
+}
+
+{$SERVER_NAME} {
+	encode zstd gzip
+
+	header {
+		X-Frame-Options "SAMEORIGIN"
+		X-Content-Type-Options "nosniff"
+		# в S3 и на чужие сайты уходит только домен, без пути с названием папки
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Strict-Transport-Security "max-age=31536000"
+		# приватная галерея не должна попадать в поисковики и архивы
+		X-Robots-Tag "noindex, nofollow, noarchive"
+		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+		# Скрипты только свои. Картинки и видео: свой домен и хранилище S3.
+		# S3_PUBLIC_ORIGIN (например https://storage.yandexcloud.net) сужает
+		# img-src/media-src до одного хранилища; без него разрешён любой https.
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: {$S3_PUBLIC_ORIGIN:https:}; media-src 'self' blob: {$S3_PUBLIC_ORIGIN:https:}; connect-src 'self'; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'; upgrade-insecure-requests"
+		# не сообщаем, на чём работает сервер
+		-Server
+	}
+
+	handle /api/* {
+		reverse_proxy backend:3000
+	}
+
+	handle {
+		root * /srv
+
+		# файлы сборки с хэшем в имени не меняются никогда
+		@assets path /assets/*
+		header @assets Cache-Control "public, max-age=31536000, immutable"
+
+		# index.html и прочее всегда перепроверяются (ETag -> 304), иначе после
+		# деплоя браузер держит старый index.html со ссылками на удалённые чанки
+		@other not path /assets/*
+		header @other Cache-Control "no-cache"
+
+		try_files {path} /index.html
+		file_server
+	}
+}

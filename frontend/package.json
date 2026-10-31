@@ -18,7 +18,6 @@
     "prop-types": "^15.8.1",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
-    "react-responsive-masonry": "^2.7.1",
     "react-router-dom": "^7.13.0",
     "sileo": "^0.1.5",
     "swiper": "^12.0.2"

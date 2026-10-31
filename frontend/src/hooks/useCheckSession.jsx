@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 export function useCheckSession() {
   const [loading, setLoading] = useState(true);
   const [authenticated, setAuthenticated] = useState(false);
+  const [user, setUser] = useState(null);
 
   useEffect(() => {
     let mounted = true;
@@ -19,8 +20,8 @@ export function useCheckSession() {
       })
       .then((data) => {
         if (!mounted) return;
-        if (data) setAuthenticated(!!data.authenticated);
-        else setAuthenticated(false);
+        setAuthenticated(!!data?.authenticated);
+        setUser(data?.authenticated ? data.user || null : null);
       })
       .catch(() => {
         if (!mounted) return;
@@ -36,5 +37,5 @@ export function useCheckSession() {
     };
   }, []);
 
-  return { authenticated, loading };
+  return { authenticated, loading, user };
 }

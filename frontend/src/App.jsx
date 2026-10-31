@@ -1,3 +1,4 @@
+import { Suspense, lazy } from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { Toaster } from 'sileo';
 import 'sileo/styles.css';
@@ -5,12 +6,11 @@ import 'sileo/styles.css';
 // pages
 import GalleryList from '@/pages/Gallery/GalleryList';
 import GalleryView from '@/pages/Gallery/GalleryView';
-import GalleryEdit from '@/pages/Gallery/GalleryEdit';
-
-import Users from '@/pages/Admin/Users';
-import Login from '@/pages/Login/Login';
-
-import NotFound from '@/pages/404/404';
+// админка, вход и 404 нужны редко: отдельные чанки, не в основном бандле
+const GalleryEdit = lazy(() => import('@/pages/Gallery/GalleryEdit'));
+const Users = lazy(() => import('@/pages/Admin/Users'));
+const Login = lazy(() => import('@/pages/Login/Login'));
+const NotFound = lazy(() => import('@/pages/404/404'));
 // components
 import ScrollProgressBar from '@/components/ScrollProgressBar/ScrollProgressBar';
 import Header from '@/components/Header/Header';
@@ -34,17 +34,19 @@ function AppInner() {
         options={sileoDefaultOptions}
       />
 
-      <Routes>
-        <Route path="/" element={<GalleryList />} />
-        <Route path="/edit" element={<GalleryEdit />} />
-        <Route path="/edit/:year/:category" element={<GalleryEdit />} />
-        <Route path="/edit/admin" element={<Users />} />
-        <Route path="/:year/:category" element={<GalleryView />} />
-        <Route path="/admin" element={<Users />} />
-        <Route path="/login" element={<Login />} />
-        <Route path="/auth" element={<Login />} />
-        <Route path="*" element={<NotFound />} />
-      </Routes>
+      <Suspense fallback={null}>
+        <Routes>
+          <Route path="/" element={<GalleryList />} />
+          <Route path="/edit" element={<GalleryEdit />} />
+          <Route path="/edit/:year/:category" element={<GalleryEdit />} />
+          <Route path="/edit/admin" element={<Users />} />
+          <Route path="/:year/:category" element={<GalleryView />} />
+          <Route path="/admin" element={<Users />} />
+          <Route path="/login" element={<Login />} />
+          <Route path="/auth" element={<Login />} />
+          <Route path="*" element={<NotFound />} />
+        </Routes>
+      </Suspense>
     </>
   );
 }

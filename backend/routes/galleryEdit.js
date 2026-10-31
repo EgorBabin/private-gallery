@@ -1,6 +1,8 @@
 import express from 'express';
 import multer from 'multer';
 import sharp from 'sharp';
+import fs from 'fs/promises';
+import os from 'os';
 import path from 'path';
 import {
     uploadToS3,
@@ -8,6 +10,7 @@ import {
     getSignedUrlForKey,
     getObjectBufferFromS3,
     headObjectMeta,
+    DERIVED_CACHE_CONTROL,
 } from '../utils/s3Client.js';
 import {
     listCards,
@@ -28,7 +31,7 @@ import {
     parseSoftDeleteBase,
     parseNumericIndexFromBase,
 } from '../utils/deletionMarker.js';
-import { publishPhotoJob } from '../utils/rabbitmq.js';
+import { publishPhotoJob } from '../utils/jobQueue.js';
 import { logAction } from '../utils/logger.js';
 import { sendError, sendSuccess } from '../utils/apiResponse.js';
 
@@ -42,6 +45,34 @@ const MAX_UPLOAD_BYTES =
     Number.isFinite(rawMaxUploadMb) && rawMaxUploadMb > 0
         ? Math.floor(rawMaxUploadMb * 1024 * 1024)
         : DEFAULT_MAX_UPLOAD_MB * 1024 * 1024;
+// расширение оригинала по типу файла: имя от клиента не должно задавать
+// произвольное расширение (например .html) ключа в S3
+const EXTENSION_BY_MIME = {
+    'image/jpeg': ['.jpg', '.jpeg'],
+    'image/png': ['.png'],
+    'image/webp': ['.webp'],
+    'image/avif': ['.avif'],
+    'image/gif': ['.gif'],
+    'image/tiff': ['.tif', '.tiff'],
+};
+
+function pickOriginalExtension(file) {
+    const allowed = EXTENSION_BY_MIME[String(file?.mimetype).toLowerCase()];
+    const clientExt = path
+        .extname(String(file?.originalname || ''))
+        .toLowerCase();
+    if (!allowed) {
+        return '.jpg';
+    }
+    return allowed.includes(clientExt) ? clientExt : allowed[0];
+}
+
+const rawMaxUploadFiles = Number(process.env.MAX_UPLOAD_IMAGES || 0);
+const MAX_UPLOAD_FILES =
+    Number.isInteger(rawMaxUploadFiles) && rawMaxUploadFiles > 0
+        ? rawMaxUploadFiles
+        : undefined;
+
 const ALLOWED_UPLOAD_MIME_TYPES = new Set([
     'image/jpeg',
     'image/png',
@@ -51,12 +82,14 @@ const ALLOWED_UPLOAD_MIME_TYPES = new Set([
     'image/tiff',
 ]);
 
+// Файлы пишутся во временную папку и читаются по одному, а не держатся
+// в памяти все сразу (до MAX_UPLOAD_IMAGES x MAX_UPLOAD_MB на запрос).
 const upload = multer({
-    storage: multer.memoryStorage(),
+    storage: multer.diskStorage({ destination: os.tmpdir() }),
     limits: {
         fileSize: MAX_UPLOAD_BYTES,
-        // keep per-file size check; do not enforce `files` here so frontend
-        // controls maximum count via environment. Multer will still enforce fileSize.
+        // лишние файлы отсекаются до записи на диск
+        files: MAX_UPLOAD_FILES,
     },
     fileFilter: (req, file, cb) => {
         void req;
@@ -443,7 +476,6 @@ router.get('/cards-admin', async (req, res) => {
             message: 'Карточки загружены',
             payload: { cards },
         });
-        logAction(req, 'Get cards-admin', '#galleryEdit.js #cards-admin');
     } catch (err) {
         console.error('cards-admin error', err);
         sendError(res, {
@@ -499,7 +531,11 @@ router.post('/cards-admin', async (req, res) => {
             if (previewKey) {
                 // previewKey normalized to start with preview/
                 const rel = synced.path; // folder path like '2024/event'
-                await addPreviewKey(rel, { key: previewKey, size: 0, lastModified: new Date().toISOString() });
+                await addPreviewKey(rel, {
+                    key: previewKey,
+                    size: 0,
+                    lastModified: new Date().toISOString(),
+                });
             }
         } catch (err) {
             void err;
@@ -588,7 +624,11 @@ router.put('/cards-admin/:id', async (req, res) => {
         const synced = await syncCardByPath(updated.path, patch.previewKey);
         try {
             if (patch.previewKey) {
-                await addPreviewKey(synced.path, { key: patch.previewKey, size: 0, lastModified: new Date().toISOString() });
+                await addPreviewKey(synced.path, {
+                    key: patch.previewKey,
+                    size: 0,
+                    lastModified: new Date().toISOString(),
+                });
             }
         } catch (err) {
             void err;
@@ -683,8 +723,8 @@ router.post('/upload', upload.array('image'), async (req, res) => {
         const files = Array.isArray(req.files)
             ? req.files
             : req.file
-            ? [req.file]
-            : [];
+              ? [req.file]
+              : [];
 
         if (files.length === 0) {
             logAction(
@@ -701,7 +741,11 @@ router.post('/upload', upload.array('image'), async (req, res) => {
 
         // optional backend-side cap if env var provided
         const rawMaxImages = Number(process.env.MAX_UPLOAD_IMAGES || 0);
-        if (Number.isFinite(rawMaxImages) && rawMaxImages > 0 && files.length > rawMaxImages) {
+        if (
+            Number.isFinite(rawMaxImages) &&
+            rawMaxImages > 0 &&
+            files.length > rawMaxImages
+        ) {
             return sendError(res, {
                 httpStatus: 413,
                 status: 'warning',
@@ -720,13 +764,13 @@ router.post('/upload', upload.array('image'), async (req, res) => {
         for (const file of files) {
             let statusKey = null;
             try {
-                const buffer = file.buffer;
+                const buffer = await fs.readFile(file.path);
                 let baseName = makeNumericName(req);
                 if (videoFlag) {
                     baseName = `video_${baseName}`;
                 }
 
-                const origExt = path.extname(file.originalname) || '.jpg';
+                const origExt = pickOriginalExtension(file);
                 const originalKey = `${ORIGINAL_ROOT}${folderPath}/${baseName}${origExt}`;
                 const sourceKey = videoFlag
                     ? `${PROCESSING_SOURCE_ROOT}${folderPath}/${baseName}${origExt}`
@@ -754,6 +798,7 @@ router.post('/upload', upload.array('image'), async (req, res) => {
                     'Uploaded new file',
                     `${baseName}
             #galleryEdit.js #upload`,
+                    { notify: false },
                 );
 
                 void (async () => {
@@ -768,7 +813,10 @@ router.post('/upload', upload.array('image'), async (req, res) => {
                             cleanupSource: videoFlag,
                         });
                     } catch (publishErr) {
-                        console.error('Failed to publish upload job:', publishErr);
+                        console.error(
+                            'Failed to publish upload job:',
+                            publishErr,
+                        );
                         if (statusKey) {
                             try {
                                 await uploadToS3(
@@ -819,9 +867,21 @@ router.post('/upload', upload.array('image'), async (req, res) => {
                         );
                     }
                 }
-                results.push({ success: false, error: String(fileErr), statusKey });
+                results.push({
+                    success: false,
+                    error: String(fileErr),
+                    statusKey,
+                });
             }
         }
+
+        const uploadedCount = results.filter((r) => r.success).length;
+        logAction(
+            req,
+            'Uploaded files',
+            `${uploadedCount}/${files.length} → ${folderPath}
+            #galleryEdit.js #upload`,
+        );
 
         sendSuccess(res, {
             httpStatus: 200,
@@ -850,7 +910,10 @@ router.post('/upload', upload.array('image'), async (req, res) => {
                     'application/json',
                 );
             } catch (statusErr) {
-                console.error('Failed to write upload error status:', statusErr);
+                console.error(
+                    'Failed to write upload error status:',
+                    statusErr,
+                );
             }
         }
         if (!res.headersSent) {
@@ -865,6 +928,13 @@ router.post('/upload', upload.array('image'), async (req, res) => {
                 #galleryEdit.js #upload #error`,
             );
         }
+    } finally {
+        const tempFiles = Array.isArray(req.files) ? req.files : [];
+        await Promise.all(
+            tempFiles.map((file) =>
+                file?.path ? fs.unlink(file.path).catch(() => {}) : null,
+            ),
+        );
     }
 });
 
@@ -1632,7 +1702,7 @@ router.get('/reconcile', async (req, res) => {
                     statusKey,
                 );
 
-                const webpOptions = { quality: 85, effort: 6 };
+                const webpOptions = { quality: 85, effort: 4 };
 
                 for (const fileObj of origFiles) {
                     if (limit > 0 && created >= limit) {
@@ -1742,6 +1812,7 @@ router.get('/reconcile', async (req, res) => {
                     let baseBuffer;
                     try {
                         baseBuffer = await sharp(origBuffer)
+                            .rotate()
                             .resize({
                                 width: maxWidth,
                                 withoutEnlargement: true,
@@ -1795,7 +1866,9 @@ router.get('/reconcile', async (req, res) => {
                                 .webp(webpOptions)
                                 .toBuffer();
 
-                            await uploadToS3(webpBuffer, missKey);
+                            await uploadToS3(webpBuffer, missKey, null, {
+                                cacheControl: DERIVED_CACHE_CONTROL,
+                            });
                             existingKeys.add(missKey);
                             created += 1;
                         } catch (err) {

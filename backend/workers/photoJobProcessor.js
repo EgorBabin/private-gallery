@@ -3,9 +3,11 @@ import {
     uploadToS3,
     getObjectBufferFromS3,
     deleteFromS3,
+    DERIVED_CACHE_CONTROL,
 } from '../utils/s3Client.js';
 import { syncCardByPath } from '../utils/galleryCardSync.js';
-import { addPreviewKey } from '../utils/s3Cache.js';
+import { normalizeEtag } from '../utils/folderListing.js';
+import { saveDimensions } from '../utils/mediaDimensions.js';
 import { processGalleryReorderJob } from './galleryReorderJobProcessor.js';
 import { processGallerySoftDeleteJob } from './gallerySoftDeleteJobProcessor.js';
 
@@ -20,7 +22,8 @@ const SCREEN_SIZES = [
     { dir: 'screen-2560', width: 2560 },
 ];
 const VIDEO_DIRS = ['video_1440', 'video_1080', 'video_720'];
-const WEBP_OPTIONS = { quality: 85, effort: 6 };
+// effort 4 в 2-3 раза быстрее 6 при почти том же размере файла
+const WEBP_OPTIONS = { quality: 85, effort: 4 };
 const SHARP_INPUT_OPTIONS = { failOn: 'truncated' };
 const JOB_TYPE_UPLOAD = 'photo-upload';
 const JOB_TYPE_REORDER = 'gallery-reorder';
@@ -97,36 +100,59 @@ async function assertReadableImage(buffer, key) {
     }
 }
 
-async function buildImageOutputs(sourceBuffer, folderPath, baseName) {
-    const maxWidth = Math.max(...SCREEN_SIZES.map((size) => size.width));
-    const baseBuffer = await sharp(sourceBuffer, SHARP_INPUT_OPTIONS)
+// Исходник декодируется один раз: EXIF-поворот (фото с телефона иначе
+// лежат набок) и уменьшение до самого большого размера в raw-пиксели,
+// из которых затем режутся все варианты.
+async function decodeOriented(sourceBuffer, maxWidth) {
+    const { data, info } = await sharp(sourceBuffer, SHARP_INPUT_OPTIONS)
+        .rotate()
         .resize({
             width: maxWidth,
             withoutEnlargement: true,
             fit: 'inside',
         })
-        .toBuffer();
+        .raw()
+        .toBuffer({ resolveWithObject: true });
+
+    return {
+        data,
+        rawInput: {
+            raw: {
+                width: info.width,
+                height: info.height,
+                channels: info.channels,
+            },
+        },
+    };
+}
+
+async function encodeWebp(decoded, width) {
+    const { data, info } = await sharp(decoded.data, decoded.rawInput)
+        .resize({
+            width,
+            withoutEnlargement: true,
+            fit: 'inside',
+        })
+        .webp(WEBP_OPTIONS)
+        .toBuffer({ resolveWithObject: true });
+
+    // Double-check produced binary is readable and not truncated.
+    await sharp(data, SHARP_INPUT_OPTIONS).metadata();
+    return { buffer: data, width: info.width, height: info.height };
+}
+
+async function buildImageOutputs(sourceBuffer, folderPath, baseName) {
+    const maxWidth = Math.max(...SCREEN_SIZES.map((size) => size.width));
+    const decoded = await decodeOriented(sourceBuffer, maxWidth);
 
     const outputs = [];
     for (const size of SCREEN_SIZES) {
-        const outKey = `${size.dir}/${folderPath}/${baseName}.webp`;
-        const resizedBuffer =
-            size.width === maxWidth
-                ? baseBuffer
-                : await sharp(baseBuffer, SHARP_INPUT_OPTIONS)
-                      .resize({
-                          width: size.width,
-                          withoutEnlargement: true,
-                          fit: 'inside',
-                      })
-                      .toBuffer();
-        const webpBuffer = await sharp(resizedBuffer, SHARP_INPUT_OPTIONS)
-            .webp(WEBP_OPTIONS)
-            .toBuffer();
-
-        // Double-check produced binary is readable and not truncated.
-        await sharp(webpBuffer, SHARP_INPUT_OPTIONS).metadata();
-        outputs.push({ key: outKey, buffer: webpBuffer });
+        const encoded = await encodeWebp(decoded, size.width);
+        outputs.push({
+            key: `${size.dir}/${folderPath}/${baseName}.webp`,
+            cacheControl: DERIVED_CACHE_CONTROL,
+            ...encoded,
+        });
     }
 
     return outputs;
@@ -134,20 +160,13 @@ async function buildImageOutputs(sourceBuffer, folderPath, baseName) {
 
 async function buildVideoOutputs(sourceBuffer, folderPath, baseName) {
     const previewWidth = 400;
-    const baseBuffer = await sharp(sourceBuffer, SHARP_INPUT_OPTIONS)
-        .resize({
-            width: previewWidth,
-            withoutEnlargement: true,
-            fit: 'inside',
-        })
-        .toBuffer();
-    const webpBuf = await sharp(baseBuffer, SHARP_INPUT_OPTIONS)
-        .webp(WEBP_OPTIONS)
-        .toBuffer();
-    await sharp(webpBuf, SHARP_INPUT_OPTIONS).metadata();
+    const decoded = await decodeOriented(sourceBuffer, previewWidth);
+    const encoded = await encodeWebp(decoded, previewWidth);
 
     const previewKey = `${PREVIEW_ROOT}${folderPath}/${baseName}.webp`;
-    const outputs = [{ key: previewKey, buffer: webpBuf }];
+    const outputs = [
+        { key: previewKey, cacheControl: DERIVED_CACHE_CONTROL, ...encoded },
+    ];
     for (const dir of VIDEO_DIRS) {
         outputs.push({
             key: `${dir}/${folderPath}/.placeholder`,
@@ -157,11 +176,28 @@ async function buildVideoOutputs(sourceBuffer, folderPath, baseName) {
     return outputs;
 }
 
+async function savePreviewDimensions(outputs) {
+    const preview = outputs.find(
+        (output) => output.key.startsWith(PREVIEW_ROOT) && output.etag,
+    );
+    if (!preview) {
+        return;
+    }
+    try {
+        await saveDimensions(preview.etag, preview.width, preview.height);
+    } catch (err) {
+        console.error('Failed to save preview dimensions', preview.key, err);
+    }
+}
+
 async function uploadOutputsAtomically(outputs) {
     const uploadedKeys = [];
     try {
         for (const output of outputs) {
-            await uploadToS3(output.buffer, output.key);
+            const result = await uploadToS3(output.buffer, output.key, null, {
+                cacheControl: output.cacheControl,
+            });
+            output.etag = normalizeEtag(result?.ETag);
             uploadedKeys.push(output.key);
         }
         return uploadedKeys;
@@ -203,16 +239,12 @@ async function processUploadJob(rawPayload) {
               );
 
         uploadedKeys = await uploadOutputsAtomically(outputs);
-
-        await safeWriteStatus(job.statusKey, {
-            status: 'done',
-            finishedAt: new Date().toISOString(),
-            keys: uploadedKeys,
-        });
+        await savePreviewDimensions(outputs);
 
         const previewKey =
             uploadedKeys.find((key) => key.startsWith(PREVIEW_ROOT)) || null;
         try {
+            // заодно обновляет кэш листинга папки в Redis
             await syncCardByPath(job.folderPath, previewKey);
         } catch (syncErr) {
             console.error(
@@ -220,18 +252,13 @@ async function processUploadJob(rawPayload) {
                 syncErr,
             );
         }
-        // Update Redis cache: add preview entries for uploaded preview keys
-        try {
-            for (const k of uploadedKeys) {
-                if (k && k.startsWith(PREVIEW_ROOT)) {
-                    // folderPath already normalized in job
-                    const item = { key: k, size: 0, lastModified: new Date().toISOString() };
-                    await addPreviewKey(job.folderPath, item);
-                }
-            }
-        } catch (err) {
-            console.error('Failed to update preview cache after upload', err);
-        }
+
+        // статус "done" только после обновления кэша, чтобы клиент сразу видел файл
+        await safeWriteStatus(job.statusKey, {
+            status: 'done',
+            finishedAt: new Date().toISOString(),
+            keys: uploadedKeys,
+        });
     } catch (err) {
         await safeWriteStatus(job.statusKey, {
             status: 'error',

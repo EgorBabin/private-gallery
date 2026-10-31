@@ -1,5 +1,9 @@
 import util from 'util';
+import pool from '../db.js';
 import { logAction } from '../utils/logger.js';
+
+// Обычная сессия (без «Запомнить меня») живёт 30 минут с последнего запроса.
+const SESSION_IDLE_MS = 1000 * 60 * 30;
 
 // import checkSession from '../utils/checkSession.js';
 
@@ -21,7 +25,10 @@ const DEFAULTS = {
         v === null ||
         v === undefined ||
         (typeof v === 'string' && v.trim() === ''),
-    enforceIpUaMatch: true, // проверка IP/UA
+    // Привязка к IP выключена по умолчанию: телефон меняет IP при переходе
+    // Wi-Fi <-> мобильная сеть, и пользователя выкидывало из галереи.
+    enforceIpMatch: process.env.SESSION_BIND_IP === 'true',
+    enforceUaMatch: true,
 };
 
 const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -45,7 +52,9 @@ export default function checkSession(opts = {}) {
         try {
             if (!req.session) {
                 try {
-                    logAction(req, 'Нет server-side сессии');
+                    logAction(req, 'Нет server-side сессии', '', {
+                        notify: false,
+                    });
                 } catch (err) {
                     console.debug('logAction failed (no session):', err);
                 }
@@ -70,7 +79,9 @@ export default function checkSession(opts = {}) {
             const user = req.session.user;
             if (!user) {
                 try {
-                    logAction(req, 'req.session.user отсутствует');
+                    logAction(req, 'req.session.user отсутствует', '', {
+                        notify: false,
+                    });
                 } catch (err) {
                     console.debug('logAction failed (no user):', err);
                 }
@@ -133,16 +144,39 @@ export default function checkSession(opts = {}) {
             }
 
             // IP/UA
-            if (cfg.enforceIpUaMatch) {
+            if (cfg.enforceIpMatch) {
                 const currentIp =
                     req.headers['x-forwarded-for']?.split(',')[0] ||
                     req.socket.remoteAddress;
-                const currentUa = req.headers['user-agent'];
                 if (req.session.ip && req.session.ip !== currentIp) {
                     missing.push('ip_mismatch');
                 }
+            }
+            if (cfg.enforceUaMatch) {
+                const currentUa = req.headers['user-agent'];
                 if (req.session.ua && req.session.ua !== currentUa) {
                     missing.push('ua_mismatch');
+                }
+            }
+
+            // Сессия сверяется с базой на каждом запросе: удалённый или
+            // отключённый пользователь теряет доступ сразу, а не когда истечёт
+            // сессия (до 30 дней), снятая роль admin тоже действует сразу.
+            if (missing.length === 0) {
+                const { rows } = await pool.query(
+                    'SELECT role, is_active FROM users WHERE id = $1',
+                    [Number(user.id)],
+                );
+                const dbUser = rows[0];
+                if (!dbUser || dbUser.is_active === false) {
+                    missing.push('user_revoked');
+                } else {
+                    const dbRole = String(dbUser.role || 'user')
+                        .trim()
+                        .toLowerCase();
+                    if (dbRole !== String(user.role).trim().toLowerCase()) {
+                        req.session.user.role = dbRole;
+                    }
                 }
             }
 
@@ -188,7 +222,12 @@ export default function checkSession(opts = {}) {
                 return res.redirect(cfg.frontendLoginPath);
             }
 
-            // ok
+            // скользящий таймаут для обычных сессий; «Запомнить меня» (30 дней)
+            // не сокращается
+            if (!(req.session.cookie.originalMaxAge > SESSION_IDLE_MS)) {
+                req.session.cookie.maxAge = SESSION_IDLE_MS;
+            }
+
             return next();
         } catch (err) {
             console.error('checkSession error:', err);

@@ -1,148 +1,139 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { Hd, X } from 'lucide-react';
 import { Swiper, SwiperSlide } from 'swiper/react';
-import { Navigation, Keyboard, Scrollbar } from 'swiper/modules';
+import { Keyboard, Navigation, Virtual } from 'swiper/modules';
 import 'swiper/css';
 import 'swiper/css/navigation';
-import 'swiper/css/scrollbar';
+import 'swiper/css/virtual';
 
 import styles from './Lightbox.module.css';
 
 const API_ORIGINAL = '/api/gallery/original';
+// сколько слайдов вокруг текущего держать в DOM и сколько метаданных грузить заранее
+const VIRTUAL_BUFFER = 1;
+const PREFETCH_RADIUS = 1;
+// догружаем следующую страницу галереи, когда до конца осталось столько слайдов
+const LOAD_MORE_THRESHOLD = 4;
+const SCREEN_SIZES = [1280, 1920, 2560];
+const VIDEO_SIZES = ['1440', '1080', '720'];
+const IMAGE_SIZES = '(min-width: 900px) 78vw, 88vw';
+
+function urlOf(value) {
+  if (!value) return null;
+  return typeof value === 'string' ? value : value.url || null;
+}
+
+function buildSrcSet(item, meta) {
+  const parts = [];
+  if (item.url) parts.push(`${item.url} 400w`);
+  for (const size of SCREEN_SIZES) {
+    const url = urlOf(meta?.[`screen${size}`] ?? meta?.[`screen-${size}`]);
+    if (url) parts.push(`${url} ${size}w`);
+  }
+  return parts.length > 1 ? parts.join(', ') : undefined;
+}
+
+function gatherVideoUrls(meta) {
+  if (!meta?.videos) return [];
+  return VIDEO_SIZES.map((res) => ({
+    res,
+    url: urlOf(meta.videos[res]),
+  })).filter((v) => v.url);
+}
+
+function getDownloadHref(item, meta) {
+  if (!meta) return null;
+  if (meta.isVideo || item.isVideo)
+    return gatherVideoUrls(meta)[0]?.url || null;
+  return urlOf(meta.original ?? meta.original_photo ?? meta.orig);
+}
+
+const LightboxSlide = memo(function LightboxSlide({ item, meta }) {
+  const isVideo = !!(meta?.isVideo || item.isVideo);
+  const poster = urlOf(meta?.preview) || item.url;
+
+  if (isVideo) {
+    const videos = gatherVideoUrls(meta);
+    return (
+      <div className={styles.videoWrap}>
+        <video
+          key={videos.map((v) => v.url).join(',') || 'pending'}
+          className={styles.video}
+          controls
+          preload="metadata"
+          playsInline
+          poster={poster}
+          crossOrigin="anonymous"
+        >
+          {videos.map((v) => (
+            <source key={v.res} src={v.url} type="video/mp4" data-res={v.res} />
+          ))}
+          Ваш браузер не поддерживает видео.
+        </video>
+      </div>
+    );
+  }
+
+  const hasSize = item.width > 0 && item.height > 0;
+  // пока метаданные грузятся, показываем уже закэшированное превью,
+  // затем браузер сам выбирает размер из srcset
+  return (
+    <img
+      src={urlOf(meta?.screen1280) || item.url}
+      srcSet={buildSrcSet(item, meta)}
+      sizes={IMAGE_SIZES}
+      width={hasSize ? item.width : undefined}
+      height={hasSize ? item.height : undefined}
+      alt={item.name ?? ''}
+      className={styles.image}
+      draggable={false}
+      decoding="async"
+    />
+  );
+});
 
 export default function Lightbox({
   items,
   startIndex = 0,
   onClose,
-  fetchOriginal,
+  hasMore = false,
+  onNeedMore,
 }) {
   const [current, setCurrent] = useState(startIndex);
-  const [metas, setMetas] = useState(() => new Array(items.length));
-  const swiperRef = useRef(null);
-  const overlayRef = useRef(null);
-  const preloadedSlidesRef = useRef(new Set());
-  const loadingSlidesRef = useRef(new Set());
+  const metaCacheRef = useRef(new Map());
+  const inflightRef = useRef(new Set());
+  const [, setMetaVersion] = useState(0);
 
-  useEffect(() => setCurrent(startIndex), [startIndex]);
-  useEffect(() => {
-    setMetas(new Array(items.length));
-    preloadedSlidesRef.current.clear();
-    loadingSlidesRef.current.clear();
-  }, [items]);
+  const loadMeta = useCallback((item) => {
+    if (!item?.key) return;
+    const cache = metaCacheRef.current;
+    const inflight = inflightRef.current;
+    if (cache.has(item.key) || inflight.has(item.key)) return;
 
-  const setMetaAt = (index, meta) => {
-    setMetas((prev) => {
-      const copy = prev ? prev.slice() : new Array(items.length);
-      copy[index] = meta;
-      return copy;
-    });
-  };
-
-  const fetchMeta = async (index) => {
-    if (index < 0 || index >= items.length) return null;
-    if (metas[index]) return metas[index];
-
-    if (typeof fetchOriginal === 'function') {
-      try {
-        const maybe = await fetchOriginal(index);
-        if (maybe && typeof maybe === 'object') {
-          setMetaAt(index, maybe);
-          return maybe;
-        }
-      } catch {
-        // ignore and fallback to API
-      }
-    }
-
-    try {
-      const previewKey = items[index].key; // e.g. 'preview/2023/event/video_10.webp' or 'preview/.../10.webp'
-      const rel = previewKey.replace(/^preview\//, '');
-      const baseNoExt = rel.replace(/\.[^.]+$/, '');
-      const originalKey = `original_photo/${baseNoExt}.jpg`;
-      const r = await fetch(
-        `${API_ORIGINAL}?key=${encodeURIComponent(originalKey)}`,
-        {
-          credentials: 'include',
-        },
-      );
-      if (!r.ok) {
-        return null;
-      }
-      const jd = await r.json();
-      if (!jd) return null;
-      setMetaAt(index, jd);
-      return jd;
-    } catch {
-      return null;
-    }
-  };
-
-  const preloadSlide = async (index) => {
-    if (index < 0 || index >= items.length) return;
-    if (preloadedSlidesRef.current.has(index)) return;
-    if (loadingSlidesRef.current.has(index)) return;
-
-    const item = items[index];
-    if (!item || item.isVideo || !item.url) {
-      preloadedSlidesRef.current.add(index);
-      return;
-    }
-
-    loadingSlidesRef.current.add(index);
-    try {
-      await new Promise((resolve) => {
-        const img = new Image();
-        img.onload = resolve;
-        img.onerror = resolve;
-        img.src = item.url;
-        if (img.complete) resolve();
-      });
-    } finally {
-      loadingSlidesRef.current.delete(index);
-      preloadedSlidesRef.current.add(index);
-    }
-  };
+    inflight.add(item.key);
+    const originalKey = item.key.replace(/^preview\//, 'original_photo/');
+    fetch(`${API_ORIGINAL}?key=${encodeURIComponent(originalKey)}`, {
+      credentials: 'include',
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((meta) => {
+        if (!meta) return;
+        cache.set(item.key, meta);
+        setMetaVersion((v) => v + 1);
+      })
+      .catch(() => {})
+      .finally(() => inflight.delete(item.key));
+  }, []);
 
   useEffect(() => {
-    let stale = false;
-    const toLoad = [
-      current,
-      current - 1,
-      current + 1,
-      current - 2,
-      current + 2,
-    ];
-    (async () => {
-      for (const i of toLoad) {
-        if (i < 0 || i >= items.length) continue;
-        if (metas[i]) continue;
-        await fetchMeta(i);
-        if (stale) return;
-      }
-    })();
-    return () => {
-      stale = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [current, items.length]);
-
-  useEffect(() => {
-    let stale = false;
-    const queue = [current, current - 1, current + 1, current - 2, current + 2];
-
-    (async () => {
-      for (const i of queue) {
-        if (stale) return;
-        if (i < 0 || i >= items.length) continue;
-        await preloadSlide(i);
-      }
-    })();
-
-    return () => {
-      stale = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [current, items.length]);
+    for (let d = 0; d <= PREFETCH_RADIUS; d += 1) {
+      loadMeta(items[current + d]);
+      if (d > 0) loadMeta(items[current - d]);
+    }
+    if (hasMore && current >= items.length - LOAD_MORE_THRESHOLD) {
+      onNeedMore?.();
+    }
+  }, [current, items, hasMore, onNeedMore, loadMeta]);
 
   useEffect(() => {
     const onKey = (e) => {
@@ -173,211 +164,74 @@ export default function Lightbox({
     };
   }, []);
 
-  const RENDER_RADIUS = 2;
-
-  const buildSrcSet = (meta) => {
-    if (!meta) return null;
-    const order = [
-      { key: 'screen-2560', w: 2560 },
-      { key: 'screen-1920', w: 1920 },
-      { key: 'screen-1280', w: 1280 },
-    ];
-    const parts = [];
-    for (const o of order) {
-      const v = meta[o.key] ?? meta[o.key.replace('-', '')];
-      const url = typeof v === 'string' ? v : v?.url;
-      if (url) parts.push(`${url} ${o.w}w`);
-    }
-    return parts.length ? parts.join(', ') : null;
-  };
-
-  const sizesAttr =
-    '(max-width:480px) 400px, (max-width:1280px) 1280px, (max-width:1920px) 1920px, 2560px';
-
-  const gatherVideoUrls = (meta) => {
-    if (!meta || !meta.videos) return [];
-    const order = ['1440', '1080', '720'];
-    const out = [];
-    for (const q of order) {
-      const v = meta.videos[q];
-      const url = typeof v === 'string' ? v : v?.url;
-      if (url) out.push({ res: q, url, key: v?.key || null });
-    }
-    return out;
-  };
-
-  const getOriginalPhotoUrl = (meta) => {
-    if (!meta) return null;
-    const original = meta.original ?? meta.original_photo ?? meta.orig;
-    if (!original) return null;
-    return typeof original === 'string' ? original : original.url || null;
-  };
-
-  const currentMeta = metas[current];
   const currentItem = items[current];
-  const currentIsVideo = !!(currentMeta?.isVideo || currentItem?.isVideo);
-  const currentBestVideo = currentIsVideo
-    ? gatherVideoUrls(currentMeta)[0]
+  const currentMeta = currentItem
+    ? metaCacheRef.current.get(currentItem.key)
     : null;
-  const currentDownloadHref = currentIsVideo
-    ? currentBestVideo?.url || null
-    : getOriginalPhotoUrl(currentMeta);
-  const currentDownloadLabel = currentIsVideo
-    ? 'Скачать видео'
-    : 'Скачать оригинал';
+  const downloadHref = currentItem
+    ? getDownloadHref(currentItem, currentMeta)
+    : null;
+  const downloadLabel =
+    currentMeta?.isVideo || currentItem?.isVideo
+      ? 'Скачать видео'
+      : 'Скачать оригинал';
 
   return (
     <div
-      ref={overlayRef}
       className={styles.overlay}
       onClick={onClose}
       aria-modal="true"
       role="dialog"
     >
       <div className={styles.container} onClick={(e) => e.stopPropagation()}>
+        {/* В DOM только текущий слайд и соседи: открытие и свайп не зависят
+            от размера папки */}
         <Swiper
-          ref={swiperRef}
+          modules={[Virtual, Keyboard, Navigation]}
+          virtual={{
+            addSlidesBefore: VIRTUAL_BUFFER,
+            addSlidesAfter: VIRTUAL_BUFFER,
+          }}
           initialSlide={startIndex}
           onSlideChange={(s) => setCurrent(s.activeIndex)}
-          modules={[Navigation, Keyboard, Scrollbar]}
           navigation={{
             nextEl: '.swiper-button-next',
             prevEl: '.swiper-button-prev',
           }}
           keyboard={{ enabled: true }}
-          scrollbar={{
-            hide: true,
-          }}
           centeredSlides
-          slidesPerView="auto"
-          spaceBetween={20}
+          slidesPerView={1.14}
+          spaceBetween={8}
           breakpoints={{
-            0: { spaceBetween: 8 },
-            600: { spaceBetween: 12 },
-            1200: { spaceBetween: 20 },
+            600: { slidesPerView: 1.2, spaceBetween: 12 },
+            900: { slidesPerView: 1.28, spaceBetween: 20 },
           }}
           className={styles.swiper}
         >
-          {items.map((it, i) => {
-            const distance = Math.abs(i - current);
-            const shouldRender = distance <= RENDER_RADIUS;
-            const meta = metas[i];
-            const srcFallback =
-              (meta && (meta.preview?.url || meta.url)) || it.url;
-            const srcSet = buildSrcSet(meta);
-            const isVideo = !!(meta?.isVideo || it.isVideo);
-            const slideStateClass =
-              distance === 0 ? styles.slideActive : styles.slideSide;
-
-            return (
-              <SwiperSlide
-                key={it.key ?? i}
-                className={`${styles.slide} ${slideStateClass}`}
-              >
-                {shouldRender ? (
-                  <>
-                    {isVideo ? (
-                      <div className={styles.videoWrap}>
-                        {(() => {
-                          const vids = gatherVideoUrls(meta);
-                          if (vids.length === 0) {
-                            return (
-                              <video
-                                key={`video-fallback-${it.key || i}`}
-                                className={styles.video}
-                                controls
-                                preload="metadata"
-                                playsInline
-                                poster={meta?.preview?.url || it.url}
-                              >
-                                Ваш браузер не поддерживает видео.
-                              </video>
-                            );
-                          }
-
-                          const videoKey = vids.map((v) => v.url).join(',');
-                          return (
-                            <video
-                              key={videoKey}
-                              className={styles.video}
-                              controls
-                              preload="metadata"
-                              playsInline
-                              poster={meta?.preview?.url || it.url}
-                              // allow downloads / cross-origin if signed urls require it
-                              crossOrigin="anonymous"
-                            >
-                              {vids.map((v) => {
-                                const lower = String(v.url).toLowerCase();
-                                const type = lower.endsWith('.webm')
-                                  ? 'video/webm'
-                                  : lower.endsWith('.ogg')
-                                    ? 'video/ogg'
-                                    : 'video/mp4';
-                                if (!v.url) {
-                                  console.warn(
-                                    'Empty video url for',
-                                    it.key,
-                                    v,
-                                  );
-                                  return null;
-                                }
-                                return (
-                                  <source
-                                    key={v.res}
-                                    src={v.url}
-                                    type={type}
-                                    data-res={v.res}
-                                  />
-                                );
-                              })}
-                              Ваш браузер не поддерживает видео.
-                            </video>
-                          );
-                        })()}
-                      </div>
-                    ) : srcSet ? (
-                      <picture className={styles.picture}>
-                        <source srcSet={srcSet} sizes={sizesAttr} />
-                        <img
-                          src={srcFallback}
-                          alt={it.key ?? `img-${i}`}
-                          className={styles.image}
-                          draggable={false}
-                          loading="eager"
-                          decoding="async"
-                        />
-                      </picture>
-                    ) : (
-                      <img
-                        src={srcFallback}
-                        alt={it.key ?? `img-${i}`}
-                        className={styles.image}
-                        draggable={false}
-                        loading="eager"
-                        decoding="async"
-                      />
-                    )}
-                  </>
-                ) : (
-                  <div className={styles.placeholder} aria-hidden="true" />
-                )}
-              </SwiperSlide>
-            );
-          })}
-
-          <div className="swiper-button-prev" aria-hidden="true" />
-          <div className="swiper-button-next" aria-hidden="true" />
+          {items.map((item, i) => (
+            <SwiperSlide
+              key={item.key ?? i}
+              virtualIndex={i}
+              className={styles.slide}
+            >
+              <LightboxSlide
+                item={item}
+                meta={metaCacheRef.current.get(item.key)}
+              />
+            </SwiperSlide>
+          ))}
         </Swiper>
+        <div className="swiper-button-prev" aria-hidden="true" />
+        <div className="swiper-button-next" aria-hidden="true" />
       </div>
 
-      {currentDownloadHref ? (
+      {downloadHref ? (
         <a
           className={styles.download}
-          href={currentDownloadHref}
+          href={downloadHref}
           target="_blank"
           rel="noreferrer noopener"
-          aria-label={currentDownloadLabel}
+          aria-label={downloadLabel}
           onClick={(e) => e.stopPropagation()}
         >
           <Hd />

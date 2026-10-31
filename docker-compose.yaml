@@ -1,53 +1,73 @@
+# Ротация логов Docker: без неё json-логи контейнеров растут бесконечно
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+# backend и photo-worker используют один и тот же образ
+x-backend: &backend-base
+  build:
+    context: ./backend
+    dockerfile: Dockerfile
+  image: private-gallery-backend:latest
+  env_file:
+    - .env
+  restart: unless-stopped
+  logging: *default-logging
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+  networks:
+    - gallery-net
+
 networks:
   gallery-net:
-    driver: bridge
-  common:
-    name: ${TRAEFIK_COMMON_NETWORK:-common}
     driver: bridge
 
 volumes:
   pgdata:
-  traefik-letsencrypt:
-  rabbitmqdata:
+  caddy-data:
+  caddy-config:
 
 services:
-  traefik:
-    image: traefik:v2.11.34
+  # HTTPS (Let's Encrypt), статика фронтенда и прокси /api — вместо Traefik + nginx
+  caddy:
+    build:
+      context: .
+      dockerfile: ./caddy/Dockerfile
+      args:
+        VITE_NAME: ${VITE_NAME:-}
+        VITE_DOMAIN: ${VITE_DOMAIN:-}
+        VITE_PROTOCOL: ${VITE_PROTOCOL:-https://}
+        VITE_MAX_UPLOAD_IMAGES: ${VITE_MAX_UPLOAD_IMAGES:-15}
+    # Caddy не нужны секреты (БД, S3, токены): только домен, email и адрес S3 для CSP
+    environment:
+      - SERVER_NAME=${SERVER_NAME}
+      - LE_EMAIL=${LE_EMAIL}
+      - S3_PUBLIC_ORIGIN=${S3_PUBLIC_ORIGIN:-https:}
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/ping"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 30s
-    command:
-      - --providers.docker=true
-      - --providers.docker.watch=true
-      - --providers.docker.endpoint=unix:///var/run/docker.sock
-      - --providers.docker.exposedbydefault=false
-      - --ping=true
-      - --entrypoints.web.address=:80
-      - --entrypoints.websecure.address=:443
-      - --entrypoints.web.http.redirections.entryPoint.to=websecure
-      - --entrypoints.web.http.redirections.entryPoint.scheme=https
-      - --certificatesresolvers.le.acme.httpchallenge.entrypoint=web
-      - --certificatesresolvers.le.acme.storage=/letsencrypt/acme.json
-      - --certificatesresolvers.le.acme.email=${LE_EMAIL}
-      # staging:
-      # - --certificatesresolvers.le.acme.caserver=https://acme-staging-v02.api.letsencrypt.org/directory
+    logging: *default-logging
+    mem_limit: ${CADDY_MEM_LIMIT:-128m}
+    depends_on:
+      - backend
     ports:
       - "80:80"
       - "443:443"
+      - "443:443/udp" # HTTP/3
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - traefik-letsencrypt:/letsencrypt
+      - caddy-data:/data
+      - caddy-config:/config
     networks:
       - gallery-net
-      - common
 
   postgres:
     image: postgres:18.1
     restart: unless-stopped
+    logging: *default-logging
+    mem_limit: ${POSTGRES_MEM_LIMIT:-512m}
     env_file:
       - .env
     environment:
@@ -58,32 +78,34 @@ services:
       - APP_INIT_EMAIL=${APP_INIT_EMAIL}
       - APP_INIT_ROLE=${APP_INIT_ROLE}
       - APP_INIT_TG_ID=${APP_INIT_TG_ID}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     volumes:
       - pgdata:/var/lib/postgresql
       - ./db/init:/docker-entrypoint-initdb.d:ro
     networks:
       - gallery-net
 
-  rabbitmq:
-    image: rabbitmq:3.13-management
-    restart: unless-stopped
-    environment:
-      - RABBITMQ_DEFAULT_USER=${RABBITMQ_USER:-guest}
-      - RABBITMQ_DEFAULT_PASS=${RABBITMQ_PASSWORD:-guest}
-    healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
-      interval: 15s
-      timeout: 5s
-      retries: 5
-      start_period: 20s
-    volumes:
-      - rabbitmqdata:/var/lib/rabbitmq
-    networks:
-      - gallery-net
-
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    logging: *default-logging
+    mem_limit: ${REDIS_MEM_LIMIT:-96m}
+    # чистый кэш: ограниченный объём, вытеснение старых ключей, без записи на диск
+    command:
+      - redis-server
+      - --maxmemory
+      - ${REDIS_MAXMEMORY:-64mb}
+      - --maxmemory-policy
+      - allkeys-lru
+      - --save
+      - ""
+      - --appendonly
+      - "no"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 15s
@@ -94,68 +116,13 @@ services:
       - gallery-net
 
   backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-      args:
-        NODE_ENV: production
-    env_file:
-      - .env
-    restart: unless-stopped
-    depends_on:
-      postgres:
-        condition: service_started
-      rabbitmq:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.backend.rule=Host(`${SERVER_NAME}`) && PathPrefix(`/api`)"
-      - "traefik.http.routers.backend.entrypoints=websecure"
-      - "traefik.http.routers.backend.tls.certresolver=le"
-      - "traefik.http.services.backend.loadbalancer.server.port=3000"
-    networks:
-      - gallery-net
+    <<: *backend-base
+    mem_limit: ${BACKEND_MEM_LIMIT:-768m}
 
+  # фоновые задачи (загрузка, сортировка, удаление) из очереди в PostgreSQL
   photo-worker:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-      args:
-        NODE_ENV: production
-    env_file:
-      - .env
-    restart: unless-stopped
-    depends_on:
-      postgres:
-        condition: service_started
-      rabbitmq:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    command: ["npm", "run", "worker"]
-    networks:
-      - gallery-net
-
-  nginx:
-    build:
-      context: .
-      dockerfile: ./nginx/Dockerfile
-      args:
-        SERVER_NAME: ${SERVER_NAME:-localhost}
-    env_file:
-      - .env
-    volumes:
-      - ./nginx/conf.d:/etc/nginx/conf.d:ro
-    restart: unless-stopped
-    depends_on:
-      - backend
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.front.rule=Host(`${SERVER_NAME}`)"
-      - "traefik.http.routers.front.entrypoints=websecure"
-      - "traefik.http.routers.front.tls.certresolver=le"
-      - "traefik.http.services.front.loadbalancer.server.port=80"
-    networks:
-      - gallery-net
+    <<: *backend-base
+    command: ["node", "worker.js"]
+    # обработка фото не должна забирать весь сервер
+    cpus: ${PHOTO_WORKER_CPUS:-1.0}
+    mem_limit: ${PHOTO_WORKER_MEM_LIMIT:-768m}

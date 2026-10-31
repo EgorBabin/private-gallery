@@ -1,41 +1,38 @@
 import express from 'express';
-import { listObjects, getSignedUrlForKey } from '../utils/s3Client.js';
-import { parseNumericIndexFromBase } from '../utils/deletionMarker.js';
+import { getSignedUrlForKey, getStableSignedUrl } from '../utils/s3Client.js';
+import {
+    parseNumericIndexFromBase,
+    parseSoftDeleteBase,
+} from '../utils/deletionMarker.js';
 import { logAction } from '../utils/logger.js';
 import {
     listCards,
     updateCardImageCount,
     updateCardPreviewKey,
+    getCardByPath,
 } from '../utils/cardsStore.js';
 import path from 'path';
-import { parseSoftDeleteBase } from '../utils/deletionMarker.js';
+import { computeCardStats } from '../utils/galleryCardSync.js';
 import {
-    getPreviewCache,
-    setPreviewCache,
-    addPreviewKey,
-} from '../utils/s3Cache.js';
+    PREVIEW_ROOT,
+    SCREEN_SIZES,
+    VIDEO_SIZES,
+    getFolderPreviews,
+    getMediaEntry,
+    splitFileName,
+} from '../utils/folderListing.js';
+import { getDimensionsByEtags } from '../utils/mediaDimensions.js';
 
 const router = express.Router();
 
-const PREVIEW_ROOT = 'preview/';
 const ORIGINAL_ROOT = 'original_photo/';
-const SCREEN_DIRS = ['screen-1280', 'screen-1920', 'screen-2560'];
-const ORIGINAL_EXTENSIONS = [
-    '.jpg',
-    '.jpeg',
-    '.png',
-    '.webp',
-    '.avif',
-    '.gif',
-    '.tif',
-    '.tiff',
-];
 const CARD_PREFIX_RE = /^\d{1,4}\/[A-Za-z]+$/;
 const RELATIVE_MEDIA_KEY_RE =
     /^\d{1,4}\/[A-Za-z]+\/(?:video_)?[A-Za-z0-9_-]+\.[A-Za-z0-9]+$/;
-const SESSION_MAX_AGE_MS = 1000 * 60 * 30;
 const CARDS_S3_CONCURRENCY = 6;
-const IS_DEBUG_LOGS = (process.env.LOG_LEVEL || '').toLowerCase() === 'debug';
+const ORIGINAL_URL_TTL_SEC = 60 * 3;
+const VIDEO_URL_TTL_SEC = 60 * 30;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 async function mapWithConcurrency(items, limit, mapper) {
     if (!Array.isArray(items) || items.length === 0) {
@@ -95,150 +92,9 @@ function splitPath(cardPath) {
     };
 }
 
-async function findFirstSignedUrl(keys, expiresInSec) {
-    for (const key of keys) {
-        try {
-            const url = await getSignedUrlForKey(key, expiresInSec, {
-                silentNotFound: true,
-            });
-            return { key, url };
-        } catch (err) {
-            void err;
-        }
-    }
-    return null;
-}
-
-function rankOriginalExtension(ext) {
-    const normalized = String(ext || '').toLowerCase();
-    const knownIndex = ORIGINAL_EXTENSIONS.indexOf(normalized);
-    return knownIndex === -1 ? ORIGINAL_EXTENSIONS.length + 1 : knownIndex;
-}
-
-async function resolveOriginalCandidates(baseNoExt) {
-    const fallbackCandidates = ORIGINAL_EXTENSIONS.map(
-        (candidateExt) => `${ORIGINAL_ROOT}${baseNoExt}${candidateExt}`,
-    );
-
-    const prefix = `${ORIGINAL_ROOT}${baseNoExt}.`;
-    const discoveredKeys = [];
-    let continuationToken = null;
-
-    try {
-        do {
-            const page = await listObjects(prefix, 1000, continuationToken);
-            const contents = page.Contents || [];
-            for (const item of contents) {
-                const key = item?.Key;
-                if (!key || key.endsWith('/')) {
-                    continue;
-                }
-                if (!key.startsWith(prefix)) {
-                    continue;
-                }
-                discoveredKeys.push(key);
-            }
-            continuationToken = page.IsTruncated
-                ? page.NextContinuationToken || null
-                : null;
-        } while (continuationToken);
-    } catch {
-        return fallbackCandidates;
-    }
-
-    if (discoveredKeys.length === 0) {
-        return fallbackCandidates;
-    }
-
-    discoveredKeys.sort((a, b) => {
-        const extA = path.posix.extname(a);
-        const extB = path.posix.extname(b);
-        const rankA = rankOriginalExtension(extA);
-        const rankB = rankOriginalExtension(extB);
-        if (rankA !== rankB) {
-            return rankA - rankB;
-        }
-        return a.localeCompare(b);
-    });
-
-    return discoveredKeys;
-}
-
-function isImageKey(key, prefixNoSlash, prefixWithSlash) {
-    if (!key) {
-        return false;
-    }
-    if (key === prefixNoSlash || key === prefixWithSlash) {
-        return false;
-    }
-    if (key.endsWith('/')) {
-        return false;
-    }
-    if (!/\.(jpe?g|png|webp|avif|gif)$/i.test(key)) {
-        return false;
-    }
-
-    const baseWithExt = path.posix.basename(String(key));
-    const ext = path.posix.extname(baseWithExt);
-    const baseNoExt = ext ? baseWithExt.slice(0, -ext.length) : baseWithExt;
-    return !parseSoftDeleteBase(baseNoExt);
-}
-
-async function loadCardStatsFromS3(cardPath) {
-    const safePath = normalizeCardPathForS3(cardPath);
-    if (!safePath) {
-        return { imageCount: 0, firstImageKey: null };
-    }
-
-    // Try Redis cache first (only keys and minimal metadata stored)
-    try {
-        const cached = await getPreviewCache(safePath);
-        if (Array.isArray(cached) && cached.length > 0) {
-            const first = cached.find((i) => i && i.key);
-            return { imageCount: cached.length, firstImageKey: first ? first.key : null };
-        }
-    } catch (err) {
-        void err;
-    }
-
-    // Fallback to S3 scan and then populate Redis cache
-    const fullPrefix = `${PREVIEW_ROOT}${safePath}/`;
-    const prefixNoSlash = fullPrefix.replace(/\/+$/, '');
-    const prefixWithSlash = `${prefixNoSlash}/`;
-
-    let continuationToken;
-    let imageCount = 0;
-    let firstImageKey = null;
-    const discovered = [];
-
-    do {
-        const data = await listObjects(fullPrefix, 1000, continuationToken);
-        const contents = data.Contents || [];
-
-        for (const obj of contents) {
-            const key = obj?.Key;
-            if (!isImageKey(key, prefixNoSlash, prefixWithSlash)) {
-                continue;
-            }
-            imageCount += 1;
-            if (!firstImageKey) {
-                firstImageKey = key;
-            }
-            discovered.push({ key, size: Number(obj.Size) || 0, lastModified: obj.LastModified ? new Date(obj.LastModified).toISOString() : null });
-        }
-
-        continuationToken = data.IsTruncated
-            ? data.NextContinuationToken || null
-            : null;
-    } while (continuationToken);
-
-    try {
-        await setPreviewCache(safePath, discovered);
-    } catch (err) {
-        void err;
-    }
-
-    return { imageCount, firstImageKey };
+function parseNonNegativeInt(value) {
+    const parsed = Number.parseInt(String(value ?? ''), 10);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
 }
 
 // GET /api/gallery/cards
@@ -251,12 +107,15 @@ router.get('/cards', async (req, res) => {
             CARDS_S3_CONCURRENCY,
             async (card) => {
                 const { year: pathYear, category } = splitPath(card.path);
+                const folderPath = normalizeCardPathForS3(card.path);
 
                 let imageCount = card.imageCount;
                 let firstImageKey = null;
+                let previewItems = [];
 
                 try {
-                    const stats = await loadCardStatsFromS3(card.path);
+                    previewItems = await getFolderPreviews(folderPath);
+                    const stats = computeCardStats(folderPath, previewItems);
                     imageCount = stats.imageCount;
                     firstImageKey = stats.firstImageKey;
 
@@ -287,11 +146,13 @@ router.get('/cards', async (req, res) => {
 
                 let thumbnailUrl = null;
                 if (previewKey) {
+                    const etag =
+                        previewItems.find((item) => item.key === previewKey)
+                            ?.etag || '';
                     try {
-                        thumbnailUrl = await getSignedUrlForKey(
+                        thumbnailUrl = await getStableSignedUrl(
                             previewKey,
-                            60 * 5,
-                            { skipHead: true },
+                            etag,
                         );
                     } catch (urlErr) {
                         console.error(
@@ -321,15 +182,11 @@ router.get('/cards', async (req, res) => {
             },
         );
 
-        if (req.session?.user) {
-            req.session.cookie.maxAge = SESSION_MAX_AGE_MS;
-        }
-
         res.json({ cards });
-        logAction(req, 'Get cards', '#gallery.js #cards');
     } catch (err) {
         console.error('cards error', err);
-        res.status(500).json({ error: err.message });
+        // детали (бакет, ключи S3) только в лог, клиенту общий текст
+        res.status(500).json({ error: 'Internal error' });
         logAction(
             req,
             'Cards error',
@@ -339,7 +196,8 @@ router.get('/cards', async (req, res) => {
     }
 });
 
-// GET /api/gallery/previews?prefix=year/category/&limit=100&continuationToken=...
+// GET /api/gallery/previews?prefix=year/category/&limit=100&offset=0
+// continuationToken поддерживается для совместимости и означает offset.
 router.get('/previews', async (req, res) => {
     try {
         const prefixParam = req.query.prefix;
@@ -379,7 +237,11 @@ router.get('/previews', async (req, res) => {
             requestedLimit = Math.min(requestedLimit, envMaxLimit);
         }
 
-        const noLimit = requestedLimit === 0; // 0 => disabled (fetch all pages)
+        const noLimit = requestedLimit === 0; // 0 => disabled (fetch all)
+        const offset =
+            parseNonNegativeInt(req.query.offset) ??
+            parseNonNegativeInt(req.query.continuationToken) ??
+            0;
         const includeDeletedRequested = String(
             req.query.includeDeleted || '',
         ).trim();
@@ -392,157 +254,106 @@ router.get('/previews', async (req, res) => {
             ['1', 'true', 'yes'].includes(
                 includeDeletedRequested.toLowerCase(),
             );
-        const continuationToken = req.query.continuationToken;
 
-        const fullPrefix = `${PREVIEW_ROOT}${normalizedPrefix}/`;
+        const folderItems = await getFolderPreviews(normalizedPrefix);
 
-        // Try Redis cache first
-        let cached = null;
-        try {
-            cached = await getPreviewCache(normalizedPrefix);
-        } catch (err) {
-            if (IS_DEBUG_LOGS) {
-                console.debug('Cache read failed:', err.message);
-            }
-        }
-
-        let items = [];
-        let isTruncated = false;
-        let nextContinuationToken = null;
-
-        if (Array.isArray(cached) && cached.length > 0) {
-            // Use cached keys (no presigned URLs stored in cache)
-            const take = noLimit ? cached.length : Math.min(requestedLimit, cached.length);
-            const slice = cached.slice(0, take);
-
-            const mappedItems = await Promise.all(
-                slice.map(async (obj) => {
-                    const key = obj.key;
-                    const baseWithExt = path.posix.basename(key);
-                    const ext = path.posix.extname(baseWithExt);
-                    const rawBase = ext ? baseWithExt.slice(0, -ext.length) : baseWithExt;
-                    const softDeleteMeta = parseSoftDeleteBase(rawBase);
-
-                    if (softDeleteMeta && !includeDeleted) return null;
-
-                    const displayBase = softDeleteMeta?.originalBase || String(rawBase || '');
-                    const idx = parseNumericIndexFromBase(displayBase) ?? 0;
-                    const isVideo = displayBase.startsWith('video_');
-                    const name = isVideo ? displayBase.replace(/^video_/, '') : displayBase;
-
-                    const url = await getSignedUrlForKey(key, 60 * 5, { skipHead: true }).catch(() => null);
-
-                    const deleteDueAt = softDeleteMeta?.deleteAt || null;
-                    const deleteDaysLeft = deleteDueAt
-                        ? Math.max(0, Math.ceil((deleteDueAt.getTime() - Date.now()) / (24 * 60 * 60 * 1000)))
-                        : null;
-
-                    return {
-                        key,
-                        url,
-                        index: idx,
-                        size: obj.size || 0,
-                        lastModified: obj.lastModified || null,
-                        isVideo,
-                        name,
-                        isPendingDeletion: Boolean(softDeleteMeta),
-                        deleteDueAt: deleteDueAt ? deleteDueAt.toISOString() : null,
-                        deleteDaysLeft,
-                    };
-                }),
-            );
-
-            items = mappedItems.filter(Boolean);
-            items.sort((a, b) => a.index - b.index);
-            isTruncated = false;
-        } else {
-            // No cache: fallback to S3 scan and populate cache
-            const contents = [];
-            let page;
-            let lastContinuation = continuationToken || undefined;
-            if (noLimit) {
-                do {
-                    page = await listObjects(fullPrefix, 1000, lastContinuation);
-                    contents.push(...(page.Contents || []));
-                    lastContinuation = page.IsTruncated ? page.NextContinuationToken || null : null;
-                } while (lastContinuation);
-            } else {
-                let remaining = Math.max(0, Number(requestedLimit));
-                do {
-                    const pageSize = Math.min(1000, remaining || 1000);
-                    page = await listObjects(fullPrefix, pageSize, lastContinuation);
-                    contents.push(...(page.Contents || []));
-                    lastContinuation = page.IsTruncated ? page.NextContinuationToken || null : null;
-                    remaining = requestedLimit - contents.length;
-                } while (lastContinuation && remaining > 0);
+        // фильтруем и сортируем весь список (дёшево), подписываем только страницу
+        const entries = [];
+        for (const obj of folderItems) {
+            const { base: rawBase } = splitFileName(obj.key);
+            const softDeleteMeta = parseSoftDeleteBase(rawBase);
+            if (softDeleteMeta && !includeDeleted) {
+                continue;
             }
 
-            const prefixNoSlash = fullPrefix.replace(/\/+$/, '');
-            const prefixWithSlash = prefixNoSlash + '/';
-
-            const fileContents = contents.filter((obj) => {
-                if (!obj || !obj.Key) return false;
-                if (obj.Key === prefixNoSlash || obj.Key === prefixWithSlash) return false;
-                if (obj.Key.endsWith('/')) return false;
-                return true;
+            const displayBase =
+                softDeleteMeta?.originalBase || String(rawBase || '');
+            const isVideo = displayBase.startsWith('video_');
+            entries.push({
+                obj,
+                softDeleteMeta,
+                index: parseNumericIndexFromBase(displayBase) ?? 0,
+                isVideo,
+                name: isVideo
+                    ? displayBase.replace(/^video_/, '')
+                    : displayBase,
             });
+        }
+        entries.sort(
+            (a, b) => a.index - b.index || a.obj.key.localeCompare(b.obj.key),
+        );
 
-            // populate cache with minimal metadata
-            try {
-                const discovered = fileContents.map((obj) => ({ key: obj.Key, size: Number(obj.Size) || 0, lastModified: obj.LastModified ? new Date(obj.LastModified).toISOString() : null }));
-                await setPreviewCache(normalizedPrefix, discovered);
-            } catch (err) {
-                if (IS_DEBUG_LOGS) {
-                    console.debug('Cache write failed:', err.message);
-                }
-            }
+        const total = entries.length;
+        const page = noLimit
+            ? entries.slice(offset)
+            : entries.slice(offset, offset + Math.max(0, requestedLimit));
 
-            const mappedItems = await Promise.all(
-                fileContents.map(async (obj) => {
-                    const baseWithExt = path.posix.basename(obj.Key);
-                    const ext = path.posix.extname(baseWithExt);
-                    const rawBase = ext ? baseWithExt.slice(0, -ext.length) : baseWithExt;
-                    const softDeleteMeta = parseSoftDeleteBase(rawBase);
+        const dimensions = await getDimensionsByEtags(
+            page.map((entry) => entry.obj.etag),
+        ).catch((err) => {
+            console.error('Failed to read media dimensions', err.message);
+            return new Map();
+        });
 
-                    if (softDeleteMeta && !includeDeleted) return null;
+        const items = await Promise.all(
+            page.map(async (entry) => {
+                const { obj, softDeleteMeta } = entry;
+                const url = await getStableSignedUrl(obj.key, obj.etag).catch(
+                    () => null,
+                );
+                const size = obj.etag ? dimensions.get(obj.etag) : null;
 
-                    const displayBase = softDeleteMeta?.originalBase || String(rawBase || '');
-                    const idx = parseNumericIndexFromBase(displayBase) ?? 0;
-                    const isVideo = displayBase.startsWith('video_');
-                    const name = isVideo ? displayBase.replace(/^video_/, '') : displayBase;
+                const deleteDueAt = softDeleteMeta?.deleteAt || null;
+                const deleteDaysLeft = deleteDueAt
+                    ? Math.max(
+                          0,
+                          Math.ceil(
+                              (deleteDueAt.getTime() - Date.now()) / DAY_MS,
+                          ),
+                      )
+                    : null;
 
-                    const url = await getSignedUrlForKey(obj.Key, 60 * 5, { skipHead: true }).catch(() => null);
+                return {
+                    key: obj.key,
+                    url,
+                    index: entry.index,
+                    size: obj.size || 0,
+                    width: size?.width || null,
+                    height: size?.height || null,
+                    lastModified: obj.lastModified || null,
+                    isVideo: entry.isVideo,
+                    name: entry.name,
+                    isPendingDeletion: Boolean(softDeleteMeta),
+                    deleteDueAt: deleteDueAt ? deleteDueAt.toISOString() : null,
+                    deleteDaysLeft,
+                };
+            }),
+        );
 
-                    const deleteDueAt = softDeleteMeta?.deleteAt || null;
-                    const deleteDaysLeft = deleteDueAt
-                        ? Math.max(0, Math.ceil((deleteDueAt.getTime() - Date.now()) / (24 * 60 * 60 * 1000)))
-                        : null;
+        const nextOffset =
+            offset + page.length < total ? offset + page.length : null;
 
-                    return {
-                        key: obj.Key,
-                        url,
-                        index: idx,
-                        size: obj.Size,
-                        lastModified: obj.LastModified,
-                        isVideo,
-                        name,
-                        isPendingDeletion: Boolean(softDeleteMeta),
-                        deleteDueAt: deleteDueAt ? deleteDueAt.toISOString() : null,
-                        deleteDaysLeft,
-                    };
-                }),
-            );
-            items = mappedItems.filter(Boolean);
-            items.sort((a, b) => a.index - b.index);
-            isTruncated = !!page.IsTruncated;
-            nextContinuationToken = page.NextContinuationToken || null;
+        // название папки отдаём с первой страницей, чтобы клиенту не грузить /cards
+        let title = null;
+        if (offset === 0) {
+            title = await getCardByPath(normalizedPrefix)
+                .then((card) => card?.title || null)
+                .catch(() => null);
         }
 
-        res.json({ items, isTruncated, nextContinuationToken });
-        logAction(req, 'Get previews', '#gallery.js #previews');
+        res.json({
+            items,
+            title,
+            total,
+            nextOffset,
+            isTruncated: nextOffset !== null,
+            nextContinuationToken:
+                nextOffset !== null ? String(nextOffset) : null,
+        });
     } catch (err) {
         console.error('previews error', err);
-        res.status(500).json({ error: err.message });
+        // детали (бакет, ключи S3) только в лог, клиенту общий текст
+        res.status(500).json({ error: 'Internal error' });
         logAction(
             req,
             'Previews error',
@@ -553,6 +364,7 @@ router.get('/previews', async (req, res) => {
 });
 
 // GET /api/gallery/original?key=year/category/1.jpg  or key=original/year/..
+// Ссылки строятся по индексу медиа папки (Redis), без запросов к S3.
 router.get('/original', async (req, res) => {
     try {
         let key = req.query.key;
@@ -560,14 +372,12 @@ router.get('/original', async (req, res) => {
             return res.status(400).json({ error: 'key required' });
         }
 
-        key = key.replace(/^\/+/, '').replace(/\.\./g, '');
+        key = String(key).replace(/^\/+/, '').replace(/\.\./g, '');
         let relative = key;
         if (key.startsWith(ORIGINAL_ROOT)) {
             relative = key.slice(ORIGINAL_ROOT.length);
         } else if (key.startsWith(PREVIEW_ROOT)) {
             relative = key.slice(PREVIEW_ROOT.length);
-        } else {
-            relative = key;
         }
 
         relative = relative.replace(/^\/+/, '');
@@ -579,51 +389,44 @@ router.get('/original', async (req, res) => {
 
         const ext = path.posix.extname(relative);
         const baseNoExt = ext ? relative.slice(0, -ext.length) : relative;
-
+        const folderPath = path.posix.dirname(baseNoExt); // e.g. "2024/event"
         const baseNameOnly = path.posix.basename(baseNoExt); // e.g. "video_12345" or "12345"
         const isVideo = baseNameOnly.startsWith('video_');
 
+        const entry = await getMediaEntry(folderPath, baseNameOnly);
+        const version = entry?.e || '';
+
         const previewKey = `${PREVIEW_ROOT}${baseNoExt}.webp`;
-        const screenKeys = SCREEN_DIRS.map((dir) => `${dir}/${baseNoExt}.webp`);
+        const previewUrl = await getStableSignedUrl(previewKey, version).catch(
+            (e) => {
+                console.error('preview signed url failed', previewKey, e);
+                return null;
+            },
+        );
 
         if (isVideo) {
             // preview оставляем с video_ в названии,
             // а ключи к .mp4 строим без префикса video_
-            const dirName = path.posix.dirname(baseNoExt); // e.g. "2024/event" или "."
-            const bareBase = baseNameOnly.replace(/^video_/, ''); // "12345"
-            const videoBase =
-                dirName === '.' || dirName === ''
-                    ? bareBase
-                    : `${dirName}/${bareBase}`;
+            const bareBase = baseNameOnly.replace(/^video_/, '');
+            const available = new Set(entry?.v || []);
 
-            const VIDEO_DIRS = ['video_1440', 'video_1080', 'video_720'];
-            const videoKeys = VIDEO_DIRS.map((d) => `${d}/${videoBase}.mp4`);
-
-            const previewUrlPromise = getSignedUrlForKey(
-                previewKey,
-                60 * 5,
-            ).catch((e) => {
-                console.error('preview signed url failed', previewKey, e);
-                return null;
-            });
-
-            const videoUrlPromises = videoKeys.map((k) =>
-                getSignedUrlForKey(k, 60 * 30).catch((e) => {
-                    console.error('getSignedUrlForKey failed for', k, e);
-                    return null;
+            const videos = {};
+            await Promise.all(
+                VIDEO_SIZES.map(async (size) => {
+                    const videoKey = `video_${size}/${folderPath}/${bareBase}.mp4`;
+                    const url = available.has(size)
+                        ? await getSignedUrlForKey(
+                              videoKey,
+                              VIDEO_URL_TTL_SEC,
+                              {
+                                  skipHead: true,
+                              },
+                          ).catch(() => null)
+                        : null;
+                    videos[size] = { key: videoKey, url };
                 }),
             );
 
-            const previewUrl = await previewUrlPromise;
-            const videoUrls = await Promise.all(videoUrlPromises);
-
-            const videos = {
-                1440: { key: videoKeys[0], url: videoUrls[0] },
-                1080: { key: videoKeys[1], url: videoUrls[1] },
-                720: { key: videoKeys[2], url: videoUrls[2] },
-            };
-
-            logAction(req, 'Get original', '#gallery.js #original #video');
             return res.json({
                 isVideo: true,
                 preview: { key: previewKey, url: previewUrl },
@@ -631,29 +434,37 @@ router.get('/original', async (req, res) => {
             });
         }
 
-        const originalCandidates = await resolveOriginalCandidates(baseNoExt);
+        const original = entry?.o
+            ? {
+                  key: entry.o,
+                  url: await getSignedUrlForKey(entry.o, ORIGINAL_URL_TTL_SEC, {
+                      skipHead: true,
+                  }).catch(() => null),
+              }
+            : null;
 
-        const [originalResult, previewUrl, ...screenUrls] = await Promise.all([
-            findFirstSignedUrl(originalCandidates, 60 * 3),
-            getSignedUrlForKey(previewKey, 60 * 3).catch(() => null),
-            ...screenKeys.map((k) =>
-                getSignedUrlForKey(k, 60 * 3).catch(() => null),
-            ),
-        ]);
+        const availableScreens = new Set(entry?.s || []);
+        const screens = {};
+        await Promise.all(
+            SCREEN_SIZES.map(async (size) => {
+                const screenKey = `screen-${size}/${baseNoExt}.webp`;
+                const url = availableScreens.has(size)
+                    ? await getStableSignedUrl(screenKey, version).catch(
+                          () => null,
+                      )
+                    : null;
+                screens[`screen${size}`] = { key: screenKey, url };
+            }),
+        );
 
         res.json({
-            original: originalResult
-                ? { key: originalResult.key, url: originalResult.url }
-                : null,
+            original: original?.url ? original : null,
             preview: { key: previewKey, url: previewUrl },
-            screen1280: { key: screenKeys[0], url: screenUrls[0] || null },
-            screen1920: { key: screenKeys[1], url: screenUrls[1] || null },
-            screen2560: { key: screenKeys[2], url: screenUrls[2] || null },
+            ...screens,
         });
-        logAction(req, 'Get original', '#gallery.js #original #photo');
     } catch (err) {
         console.error('original error', err);
-        res.status(500).json({ error: err.message || 'Internal error' });
+        res.status(500).json({ error: 'Internal error' });
         logAction(
             req,
             'Original error',

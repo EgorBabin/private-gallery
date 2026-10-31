@@ -33,3 +33,19 @@ ON public.cards (sort_order ASC, id ASC);
 
 CREATE INDEX IF NOT EXISTS idx_cards_year
 ON public.cards (year DESC);
+
+-- backend создаёт эту таблицу и сам, если база уже инициализирована
+CREATE TABLE IF NOT EXISTS public.media_dimensions (
+  etag text PRIMARY KEY,
+  width integer NOT NULL CHECK (width > 0),
+  height integer NOT NULL CHECK (height > 0)
+);
+
+-- очередь фоновых задач для photo-worker (backend создаёт её и сам)
+CREATE TABLE IF NOT EXISTS public.jobs (
+  id bigserial PRIMARY KEY,
+  payload jsonb NOT NULL,
+  attempts integer NOT NULL DEFAULT 0,
+  locked_at timestamptz,
+  created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
+);

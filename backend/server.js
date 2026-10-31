@@ -4,8 +4,8 @@ import session from 'express-session';
 
 import helmet from 'helmet';
 
-import cookieParser from 'cookie-parser';
-import csurf from 'csurf';
+import { csrfProtection, csrfTokenHandler } from './utils/csrf.js';
+import { rateLimit } from './utils/rateLimit.js';
 
 import pgSession from 'connect-pg-simple';
 import pool from './db.js';
@@ -25,7 +25,8 @@ import galleryRoutes from './routes/gallery.js';
 import galleryEditRoutes from './routes/galleryEdit.js';
 
 const app = express();
-const IS_DEBUG_LOGS = (process.env.LOG_LEVEL || '').toLowerCase() === 'debug';
+const RATE_LIMIT_PER_MINUTE =
+    Number.parseInt(process.env.RATE_LIMIT_PER_MINUTE || '', 10) || 600;
 const requireAdmin = requireRole('admin');
 
 if (!process.env.SESSION_SECRET) {
@@ -36,7 +37,15 @@ app.set('trust proxy', 1);
 
 app.use(helmet());
 
-app.use(cookieParser());
+// общий лимит на API и отдельный, строже, на вход (перебор/спам ботов)
+app.use(
+    '/api/',
+    rateLimit({ windowMs: 60 * 1000, max: RATE_LIMIT_PER_MINUTE }),
+);
+app.use(
+    ['/api/telegram', '/api/yandex'],
+    rateLimit({ windowMs: 10 * 60 * 1000, max: 30 }),
+);
 
 app.use(
     cors({
@@ -69,34 +78,31 @@ app.use(
     }),
 );
 
-if (IS_DEBUG_LOGS) {
-    app.use((req, res, next) => {
-        console.log('CSRF cookie present:', Boolean(req.cookies._csrf));
-        console.log('CSRF header present:', Boolean(req.get('X-CSRF-Token')));
-        next();
-    });
-}
+app.use(csrfProtection);
 
-app.use(
-    csurf({
-        cookie: {
+app.get('/api/csrf-token', csrfTokenHandler);
+
+// выход: удаляем сессию на сервере и cookie в браузере
+app.post('/api/logout', (req, res) => {
+    const finish = () => {
+        res.clearCookie(process.env.SESSION || 'connect.sid', {
             httpOnly: true,
             secure: true,
             sameSite: 'lax',
-        },
-    }),
-);
-
-app.use((err, req, res, next) => {
-    void next;
-    if (err.code === 'EBADCSRFTOKEN') {
-        return res.status(403).json({ error: 'Invalid CSRF token' });
+            path: '/',
+        });
+        res.json({ ok: true });
+    };
+    if (!req.session) {
+        return finish();
     }
-    next(err);
-});
-
-app.get('/api/csrf-token', (req, res) => {
-    res.json({ csrfToken: req.csrfToken() });
+    req.session.destroy((err) => {
+        if (err) {
+            console.error('Logout failed:', err.message);
+            return res.status(500).json({ error: 'Internal error' });
+        }
+        return finish();
+    });
 });
 
 app.use(useragent.express());

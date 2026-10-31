@@ -1,354 +1,302 @@
-import React, { useEffect, useState, useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import React, {
+  Suspense,
+  lazy,
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { Play } from 'lucide-react';
-import Masonry, { ResponsiveMasonry } from 'react-responsive-masonry';
-import { useCheckSession } from '@/hooks/useCheckSession';
-import Lightbox from '@/components/Lightbox/Lightbox';
 import { useTitle } from '@/hooks/useTitle';
 import styles from './GalleryView.module.css';
 
+const Lightbox = lazy(() => import('@/components/Lightbox/Lightbox'));
+
 const API = '/api/gallery';
-const LS_KEY = 'gallery_items_cache';
-const CARDS_LS_KEY = 'gallery_cards_cache';
-const MASONRY_BREAKPOINTS = {
-  0: 3,
-  760: 4,
-  980: 5,
-  1200: 6,
-};
-const MASONRY_GUTTER_BREAKPOINTS = {
-  0: '3px',
-  760: '5px',
-  980: '7px',
-};
+const LS_KEY = 'gallery_items_cache_v2';
+const LS_MAX_FOLDERS = 8;
+// подписанные ссылки стабильны 1 час (S3_SIGNED_URL_WINDOW_SEC) и живут
+// минимум ещё час после получения: кэш моложе часа всегда с рабочими ссылками
+const LS_MAX_AGE_MS = 50 * 60 * 1000;
+const PAGE_SIZE = 120;
+const LOAD_MORE_MARGIN = '1500px';
+const COLUMN_BREAKPOINTS = [
+  [1200, 6],
+  [980, 5],
+  [760, 4],
+  [0, 3],
+];
+const GUTTER_BREAKPOINTS = [
+  [980, 7],
+  [760, 5],
+  [0, 3],
+];
+const SKELETON_COUNT = 12;
+
+// старый формат кэша хранил все папки с протухшими ссылками
+try {
+  localStorage.removeItem('gallery_items_cache');
+} catch {
+  // localStorage недоступен
+}
+
+function pickByWidth(breakpoints, width) {
+  for (const [minWidth, value] of breakpoints) {
+    if (width >= minWidth) return value;
+  }
+  return breakpoints[breakpoints.length - 1][1];
+}
+
+function readCache(prefixKey) {
+  try {
+    const root = JSON.parse(localStorage.getItem(LS_KEY) || '{}');
+    const entry = root[prefixKey];
+    if (!entry || !Array.isArray(entry.items)) return null;
+    if (Date.now() - Number(entry.updatedAt || 0) > LS_MAX_AGE_MS) return null;
+    return entry;
+  } catch {
+    return null;
+  }
+}
+
+function writeCache(prefixKey, entry) {
+  try {
+    const root = JSON.parse(localStorage.getItem(LS_KEY) || '{}');
+    root[prefixKey] = { ...entry, updatedAt: Date.now() };
+    const keep = Object.entries(root)
+      .sort((a, b) => (b[1]?.updatedAt || 0) - (a[1]?.updatedAt || 0))
+      .slice(0, LS_MAX_FOLDERS);
+    localStorage.setItem(LS_KEY, JSON.stringify(Object.fromEntries(keep)));
+  } catch {
+    // переполнение или запрет localStorage не критичны
+  }
+}
+
+// Число колонок меняется только на брейкпоинтах: появление адресной строки
+// на телефоне (resize по высоте) не перерисовывает сетку.
+function useColumnLayout(containerRef) {
+  const [layout, setLayout] = useState(() => {
+    const width = typeof window !== 'undefined' ? window.innerWidth : 1024;
+    return {
+      columns: pickByWidth(COLUMN_BREAKPOINTS, width),
+      gutter: pickByWidth(GUTTER_BREAKPOINTS, width),
+    };
+  });
+
+  useEffect(() => {
+    const update = () => {
+      const width = window.innerWidth;
+      const columns = pickByWidth(COLUMN_BREAKPOINTS, width);
+      const gutter = pickByWidth(GUTTER_BREAKPOINTS, width);
+      setLayout((prev) =>
+        prev.columns === columns && prev.gutter === gutter
+          ? prev
+          : { columns, gutter },
+      );
+    };
+    const node = containerRef.current;
+    if (typeof ResizeObserver === 'undefined' || !node) {
+      window.addEventListener('resize', update);
+      return () => window.removeEventListener('resize', update);
+    }
+    const observer = new ResizeObserver(update);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [containerRef]);
+
+  return layout;
+}
+
+// Раскладка по самой короткой колонке по известным пропорциям: порядок
+// уже размещённых элементов не меняется при догрузке следующих страниц.
+function buildColumns(items, columnCount) {
+  const columns = Array.from({ length: columnCount }, () => []);
+  const heights = new Array(columnCount).fill(0);
+  items.forEach((item, index) => {
+    const ratio =
+      item.width > 0 && item.height > 0 ? item.height / item.width : 1;
+    let target = 0;
+    for (let c = 1; c < columnCount; c += 1) {
+      if (heights[c] < heights[target]) target = c;
+    }
+    columns[target].push(index);
+    heights[target] += ratio;
+  });
+  return columns;
+}
+
+const GridItem = memo(function GridItem({ item, index, onOpen }) {
+  const hasSize = item.width > 0 && item.height > 0;
+  const isVideo = !!item.isVideo;
+  return (
+    <div
+      className={styles.item}
+      style={hasSize ? { aspectRatio: `${item.width} / ${item.height}` } : null}
+      onClick={() => onOpen(index)}
+      role="button"
+      tabIndex={0}
+      aria-label={isVideo ? 'Открыть видео' : 'Открыть изображение'}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') onOpen(index);
+      }}
+    >
+      {item.url && (
+        <img
+          src={item.url}
+          width={hasSize ? item.width : undefined}
+          height={hasSize ? item.height : undefined}
+          loading="lazy"
+          decoding="async"
+          alt={item.name ?? ''}
+          className={hasSize ? styles.imgFill : styles.img}
+        />
+      )}
+      {isVideo && (
+        <div className={styles.playOverlay} aria-hidden="true">
+          <div className={styles.playBadge}>
+            <Play className={styles.playIcon} />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+});
 
 export default function GalleryView() {
   const { year, category } = useParams();
-  const prefix = `${year}/${category}/`;
   const prefixKey = `${year}/${category}`;
+  const location = useLocation();
+  const nav = useNavigate();
 
-  const [items, setItems] = useState([]);
-  const [openIndex, setOpenIndex] = useState(-1);
-
-  const [originalUrls, setOriginalUrls] = useState([]);
-  const [originalMetas, setOriginalMetas] = useState([]);
-  const [cardTitle, setCardTitle] = useState('');
+  const [items, setItems] = useState(() => readCache(prefixKey)?.items || []);
+  const [cardTitle, setCardTitle] = useState(
+    () => readCache(prefixKey)?.title || '',
+  );
+  const [nextOffset, setNextOffset] = useState(null);
+  const [loaded, setLoaded] = useState(false);
+  const loadingMoreRef = useRef(false);
+  const gridRef = useRef(null);
+  const sentinelRef = useRef(null);
+  const openedHereRef = useRef(false);
 
   useTitle(cardTitle ? `${year} ${cardTitle}` : `${year} ${category}`);
 
-  const { authenticated, loading: sessionLoading } = useCheckSession();
-  const nav = useNavigate();
-
-  useEffect(() => {
-    if (!sessionLoading && !authenticated) {
-      nav('/login');
-    }
-  }, [sessionLoading, authenticated, nav]);
-
-  useEffect(() => {
-    let mounted = true;
-    const controller = new AbortController();
-
-    const applyCardTitle = (cards) => {
-      if (!mounted || !Array.isArray(cards)) {
-        return;
-      }
-      const matched = cards.find((card) => card?.path === prefixKey);
-      setCardTitle(matched?.title || '');
-    };
-
-    try {
-      const raw = localStorage.getItem(CARDS_LS_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        applyCardTitle(parsed?.cards || []);
-      }
-    } catch (err) {
-      void err;
-    }
-
-    (async () => {
-      try {
-        const res = await fetch(`${API}/cards`, {
-          credentials: 'include',
-          signal: controller.signal,
-        });
-        if (res.status === 401) {
-          nav('/login');
-          return;
-        }
-        if (!res.ok) {
-          return;
-        }
-        const data = await res.json();
-        applyCardTitle(data?.cards || []);
-      } catch (err) {
-        if (err.name !== 'AbortError') {
-          void err;
-        }
-      }
-    })();
-
-    return () => {
-      mounted = false;
-      controller.abort();
-    };
-  }, [nav, prefixKey]);
-
-  const pickUrlFromMeta = useCallback((meta) => {
-    if (!meta) return null;
-    if (typeof meta === 'string') return meta;
-    if (meta.url && typeof meta.url === 'string') return meta.url;
-
-    const dpr =
-      typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
-    const width =
-      typeof window !== 'undefined' ? (window.innerWidth || 1024) * dpr : 1024;
-    const effectiveType =
-      (navigator &&
-        navigator.connection &&
-        navigator.connection.effectiveType) ||
-      '';
-    const slow = ['slow-2g', '2g', '3g'].includes(effectiveType);
-
-    const orderIfSlow = [
-      'preview',
-      'screen-1280',
-      'screen-1920',
-      'screen-2560',
-      'original',
-    ];
-    const orderIfFast = [
-      'screen-2560',
-      'screen-1920',
-      'screen-1280',
-      'preview',
-      'original',
-    ];
-
-    let preferred = null;
-    if (width <= 400) preferred = 'preview';
-    else if (width <= 1280) preferred = 'screen-1280';
-    else if (width <= 1920) preferred = 'screen-1920';
-    else preferred = 'screen-2560';
-
-    const getUrl = (k) => {
-      const v = meta[k] ?? meta[k.replace('-', '')];
-      if (!v) return null;
-      if (typeof v === 'string') return v;
-      if (v.url) return v.url;
-      return null;
-    };
-
-    const order = slow
-      ? orderIfSlow
-      : [preferred, ...orderIfFast.filter((o) => o !== preferred)];
-
-    for (const k of order) {
-      const u = getUrl(k);
-      if (u) return u;
-    }
-
-    const orig =
-      getUrl('original') || getUrl('original_photo') || getUrl('orig');
-    if (orig) return orig;
-
-    for (const v of Object.values(meta)) {
-      if (!v) continue;
-      if (typeof v === 'string') return v;
-      if (v && v.url) return v.url;
-    }
-    return null;
-  }, []);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    let mounted = true;
-
-    try {
-      const raw = localStorage.getItem(LS_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (
-          parsed &&
-          parsed[prefixKey] &&
-          Array.isArray(parsed[prefixKey].items) &&
-          mounted
-        ) {
-          const cachedItems = parsed[prefixKey].items;
-          setItems(cachedItems);
-          setOriginalUrls(new Array(cachedItems.length));
-          setOriginalMetas(new Array(cachedItems.length));
-        }
-      }
-    } catch (err) {
-      void err;
-    }
-
-    (async () => {
-      try {
-        const res = await fetch(
-          `${API}/previews?prefix=${encodeURIComponent(prefix)}`,
-          { credentials: 'include', signal: controller.signal },
-        );
-        if (!mounted) return;
-        if (!res.ok) {
-          setItems([]);
-          setOriginalUrls([]);
-          setOriginalMetas([]);
-          return;
-        }
-        const d = await res.json();
-        let newItems = d.items || [];
-
-        const getNumericIndexFromKey = (k) => {
-          if (!k) return 0;
-          const baseWithExt = String(k).split('/').pop();
-          const rawBase = baseWithExt
-            .replace(/^video_/, '')
-            .replace(/\.[^.]+$/, '');
-          const m = rawBase.match(/(\d+)$/);
-          return m ? Number(m[1]) : 0;
-        };
-
-        newItems = newItems.slice().sort((a, b) => {
-          const ai = getNumericIndexFromKey(a.key || '');
-          const bi = getNumericIndexFromKey(b.key || '');
-          if (ai === bi) return (a.key || '').localeCompare(b.key || '');
-          return ai - bi;
-        });
-
-        setItems(newItems);
-
-        setOriginalUrls((prev) => {
-          const arr = new Array(newItems.length);
-          for (let i = 0; i < Math.min(prev.length, arr.length); i++)
-            arr[i] = prev[i];
-          return arr;
-        });
-        setOriginalMetas((prev) => {
-          const arr = new Array(newItems.length);
-          for (let i = 0; i < Math.min(prev.length, arr.length); i++)
-            arr[i] = prev[i];
-          return arr;
-        });
-
-        try {
-          const rootRaw = localStorage.getItem(LS_KEY);
-          const root = rootRaw ? JSON.parse(rootRaw) : {};
-          root[prefixKey] = { items: newItems, updatedAt: Date.now() };
-          localStorage.setItem(LS_KEY, JSON.stringify(root));
-        } catch (err) {
-          void err;
-        }
-      } catch (err) {
-        if (err.name === 'AbortError') return;
-        if (!mounted) return;
-        setItems([]);
-        setOriginalUrls([]);
-        setOriginalMetas([]);
-      }
-    })();
-
-    return () => {
-      mounted = false;
-      controller.abort();
-    };
-  }, [prefix, prefixKey]);
-
-  const open = useCallback(
-    async (index) => {
-      if (index < 0 || index >= items.length) return;
-      setOpenIndex(index);
-
-      const needed = [index];
-      if (index - 1 >= 0) needed.push(index - 1);
-      if (index + 1 < items.length) needed.push(index + 1);
-
-      const fetchedUrls = {};
-      const fetchedMetas = {};
-
-      await Promise.all(
-        needed.map(async (i) => {
-          if (originalUrls[i]) {
-            fetchedUrls[i] = originalUrls[i];
-            return;
-          }
-          try {
-            const key = items[i].key.replace(/^preview\//, 'original_photo/');
-            const r = await fetch(
-              `/api/gallery/original?key=${encodeURIComponent(key)}`,
-              { credentials: 'include' },
-            );
-            if (!r.ok) return;
-            const jd = await r.json();
-
-            const chosen = pickUrlFromMeta(jd);
-            if (chosen) fetchedUrls[i] = chosen;
-            fetchedMetas[i] = jd;
-          } catch (err) {
-            void err;
-          }
-        }),
-      );
-
-      if (
-        Object.keys(fetchedUrls).length === 0 &&
-        Object.keys(fetchedMetas).length === 0
-      )
-        return;
-
-      setOriginalUrls((prev) => {
-        const copy = prev.slice();
-        if (copy.length < items.length) copy.length = items.length;
-        for (const k of Object.keys(fetchedUrls))
-          copy[Number(k)] = fetchedUrls[k];
-        return copy;
-      });
-
-      setOriginalMetas((prev) => {
-        const copy = prev.slice();
-        if (copy.length < items.length) copy.length = items.length;
-        for (const k of Object.keys(fetchedMetas))
-          copy[Number(k)] = fetchedMetas[k];
-        return copy;
-      });
-    },
-    [items, originalUrls, pickUrlFromMeta],
+  const { columns: columnCount, gutter } = useColumnLayout(gridRef);
+  const columns = useMemo(
+    () => buildColumns(items, columnCount),
+    [items, columnCount],
   );
 
-  const fetchOriginal = useCallback(
-    async (i) => {
-      if (i < 0 || i >= items.length) return null;
-      if (originalUrls[i]) return originalUrls[i];
-      try {
-        const key = items[i].key.replace(/^preview\//, 'original_photo/');
-        const res = await fetch(
-          `/api/gallery/original?key=${encodeURIComponent(key)}`,
-          { credentials: 'include' },
-        );
-        if (!res.ok) return null;
-        const jd = await res.json();
-        const chosen = pickUrlFromMeta(jd);
-        setOriginalUrls((prev) => {
-          const copy = prev.slice();
-          if (copy.length < items.length) copy.length = items.length;
-          copy[i] = chosen;
-          return copy;
-        });
-        setOriginalMetas((prev) => {
-          const copy = prev.slice();
-          if (copy.length < items.length) copy.length = items.length;
-          copy[i] = jd;
-          return copy;
-        });
-        return chosen;
-      } catch {
+  const fetchPage = useCallback(
+    async (offset, signal) => {
+      const params = new URLSearchParams({
+        prefix: `${prefixKey}/`,
+        limit: String(PAGE_SIZE),
+        offset: String(offset),
+      });
+      const res = await fetch(`${API}/previews?${params}`, {
+        credentials: 'include',
+        signal,
+      });
+      if (res.status === 401) {
+        nav('/login');
         return null;
       }
+      if (!res.ok) throw new Error(`previews ${res.status}`);
+      return res.json();
     },
-    [items, originalUrls, pickUrlFromMeta],
+    [prefixKey, nav],
   );
+
+  // первая страница: показываем кэш сразу, затем заменяем свежими данными
+  useEffect(() => {
+    const controller = new AbortController();
+    const cached = readCache(prefixKey);
+    setItems(cached?.items || []);
+    setCardTitle(cached?.title || '');
+    setNextOffset(null);
+    setLoaded(false);
+
+    fetchPage(0, controller.signal)
+      .then((data) => {
+        if (!data) return;
+        const fresh = data.items || [];
+        setItems(fresh);
+        setNextOffset(data.nextOffset ?? null);
+        setCardTitle(data.title || '');
+        setLoaded(true);
+        writeCache(prefixKey, { items: fresh, title: data.title || '' });
+      })
+      .catch((err) => {
+        if (err.name === 'AbortError') return;
+        setLoaded(true);
+      });
+
+    return () => controller.abort();
+  }, [prefixKey, fetchPage]);
+
+  const loadMore = useCallback(async () => {
+    if (!loaded || nextOffset === null || loadingMoreRef.current) return;
+    loadingMoreRef.current = true;
+    try {
+      const data = await fetchPage(nextOffset);
+      if (!data) return;
+      setItems((prev) => {
+        const seen = new Set(prev.map((item) => item.key));
+        return prev.concat(
+          (data.items || []).filter((item) => !seen.has(item.key)),
+        );
+      });
+      setNextOffset(data.nextOffset ?? null);
+    } catch {
+      // следующая попытка при следующем пересечении
+    } finally {
+      loadingMoreRef.current = false;
+    }
+  }, [loaded, nextOffset, fetchPage]);
+
+  useEffect(() => {
+    const node = sentinelRef.current;
+    if (!node || nextOffset === null) return undefined;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) void loadMore();
+      },
+      { rootMargin: LOAD_MORE_MARGIN },
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [loadMore, nextOffset]);
+
+  // открытый лайтбокс хранится в истории: кнопка «назад» на телефоне
+  // закрывает его, а не уводит со страницы
+  const rawOpenIndex = location.state?.lightbox;
+  const openIndex =
+    Number.isInteger(rawOpenIndex) && rawOpenIndex < items.length
+      ? rawOpenIndex
+      : -1;
+
+  const open = useCallback(
+    (index) => {
+      openedHereRef.current = true;
+      nav(location.pathname, { state: { lightbox: index } });
+    },
+    [nav, location.pathname],
+  );
+
+  const close = useCallback(() => {
+    if (openedHereRef.current) {
+      openedHereRef.current = false;
+      nav(-1);
+    } else {
+      nav(location.pathname, { replace: true, state: null });
+    }
+  }, [nav, location.pathname]);
+
+  const showSkeleton = items.length === 0 && !loaded;
 
   return (
     <>
@@ -362,73 +310,66 @@ export default function GalleryView() {
       </h1>
 
       <div className={styles.gridWrap}>
-        <div className={styles.grid}>
-          <ResponsiveMasonry
-            columnsCountBreakPoints={MASONRY_BREAKPOINTS}
-            gutterBreakPoints={MASONRY_GUTTER_BREAKPOINTS}
-          >
-            <Masonry>
-              {items.length === 0
-                ? Array.from({ length: 12 }).map((_, i) => (
-                    <div
-                      key={`skeleton-${i}`}
-                      className={`${styles.item} ${styles.skeleton}`}
-                      aria-hidden="true"
-                    >
-                      <div className={styles.skeletonPhoto} />
-                    </div>
-                  ))
-                : items.map((it, idx) => {
-                    const key = it.key ?? `${prefix}${idx}`;
-                    const isVideo = !!it.isVideo;
-                    return (
+        <div
+          ref={gridRef}
+          className={styles.grid}
+          style={{ gap: `${gutter}px` }}
+        >
+          {showSkeleton
+            ? Array.from({ length: columnCount }, (_, c) => (
+                <div
+                  key={c}
+                  className={styles.column}
+                  style={{ gap: `${gutter}px` }}
+                >
+                  {Array.from(
+                    { length: Math.ceil(SKELETON_COUNT / columnCount) },
+                    (_, i) => (
                       <div
-                        key={key}
-                        className={styles.item}
-                        onClick={() => open(idx)}
-                        role="button"
-                        tabIndex={0}
-                        aria-label={
-                          isVideo ? 'Открыть видео' : 'Открыть изображение'
-                        }
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' || e.key === ' ') open(idx);
-                        }}
-                      >
-                        <img
-                          src={it.url}
-                          loading="lazy"
-                          decoding="async"
-                          alt={it.name ?? it.key ?? `${prefix}${idx}`}
-                          className={styles.img}
-                        />
-                        {isVideo && (
-                          <div
-                            className={styles.playOverlay}
-                            aria-hidden="true"
-                          >
-                            <div className={styles.playBadge}>
-                              <Play className={styles.playIcon} />
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-            </Masonry>
-          </ResponsiveMasonry>
+                        key={i}
+                        className={`${styles.item} ${styles.skeleton}`}
+                        aria-hidden="true"
+                      />
+                    ),
+                  )}
+                </div>
+              ))
+            : columns.map((indexes, c) => (
+                <div
+                  key={c}
+                  className={styles.column}
+                  style={{ gap: `${gutter}px` }}
+                >
+                  {indexes.map((index) => (
+                    <GridItem
+                      key={items[index].key}
+                      item={items[index]}
+                      index={index}
+                      onOpen={open}
+                    />
+                  ))}
+                </div>
+              ))}
         </div>
+        {nextOffset !== null && (
+          <div
+            ref={sentinelRef}
+            className={styles.sentinel}
+            aria-hidden="true"
+          />
+        )}
       </div>
 
       {openIndex >= 0 && (
-        <Lightbox
-          startIndex={openIndex}
-          items={items}
-          originalUrls={originalUrls}
-          originalMetas={originalMetas}
-          onClose={() => setOpenIndex(-1)}
-          fetchOriginal={fetchOriginal}
-        />
+        <Suspense fallback={null}>
+          <Lightbox
+            startIndex={openIndex}
+            items={items}
+            onClose={close}
+            hasMore={nextOffset !== null}
+            onNeedMore={loadMore}
+          />
+        </Suspense>
       )}
     </>
   );

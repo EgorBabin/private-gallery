@@ -13,4 +13,10 @@ const pool = new Pool({
     database: process.env.PG_DATABASE,
 });
 
+// без обработчика обрыв простаивающего соединения (например, перезапуск
+// Postgres) роняет весь процесс
+pool.on('error', (err) => {
+    console.error('PostgreSQL idle client error:', err.message);
+});
+
 export default pool;

@@ -42,7 +42,7 @@ Private Gallery родилась как проект для себя: быстр
 
 ### Фоновая Обработка
 
-Загрузка, сортировка и soft delete уходят в RabbitMQ workers. Reorder не просто меняет UI: система переименовывает связанные S3-версии, проверяет hash и показывает статус выполнения.
+Загрузка, сортировка и soft delete уходят в фоновый worker через очередь в PostgreSQL. Reorder не просто меняет UI: система переименовывает связанные S3-версии, проверяет hash и показывает статус выполнения.
 
 ## Почему Это Сильная Основа Для Клиента
 
@@ -109,23 +109,24 @@ Private Gallery закрывает не только красивый просм
 Browser
   |
   v
-Traefik / HTTPS
+Caddy / HTTPS (Let's Encrypt)
   |
-  +-- Nginx -> React frontend
+  +-- React frontend (статика)
   |
-  +-- Express API
+  +-- /api -> Express API
         |
-        +-- PostgreSQL: users, sessions, cards
+        +-- PostgreSQL: users, sessions, cards, размеры медиа
+        +-- Redis: кэш листингов и индекса медиа
         +-- S3-compatible storage: originals, previews, videos
-        +-- RabbitMQ -> worker: upload, reorder, soft delete
+        +-- PostgreSQL-очередь -> worker: upload, reorder, soft delete
 ```
 
 ## Стек
 
-- **Frontend:** React 19, Vite, React Router, Swiper, React Responsive Masonry, DnD Kit, Lucide React, Sileo.
-- **Backend:** Node.js, Express 5, PostgreSQL, `express-session`, `connect-pg-simple`, `csurf`, Helmet, Multer, Sharp.
-- **Storage & jobs:** S3-compatible storage, signed URLs, RabbitMQ workers.
-- **Infra:** Docker Compose, Traefik, Nginx, PostgreSQL, RabbitMQ.
+- **Frontend:** React 19, Vite, React Router, Swiper, DnD Kit, Lucide React, Sileo.
+- **Backend:** Node.js, Express 5, PostgreSQL, `express-session`, `connect-pg-simple`, CSRF (HMAC-токен + Origin), Helmet, Multer, Sharp.
+- **Storage & jobs:** S3-compatible storage, signed URLs, Redis cache, очередь задач в PostgreSQL.
+- **Infra:** Docker Compose, Caddy, PostgreSQL, Redis.
 
 ## Хранение Медиа
 
@@ -200,14 +201,13 @@ nano .env
 
 Заполните основные значения:
 
-- `SERVER_NAME`, `LE_EMAIL`, `FRONTEND_URL` - домен и HTTPS.
+- `SERVER_NAME`, `LE_EMAIL`, `FRONTEND_URL` - домен и HTTPS (сертификат выпускает Caddy, порты 80 и 443 должны быть открыты).
 - `SESSION`, `SESSION_SECRET` - сессии.
 - `S3_BUCKET`, `S3_REGION`, `S3_ENDPOINT`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` - S3-compatible storage.
 - `PG_USER`, `PG_PASSWORD`, `PG_HOST`, `PG_PORT`, `PG_DATABASE` - PostgreSQL.
-- `RABBITMQ_*` - очередь фоновых задач.
 - `APP_INIT_*` - первый пользователь.
 - `YANDEX_*` - Yandex OAuth.
-- `VITE_TG_BOT_USERNAME`, `TG_BOT_TOKEN`, `TG_CHAT_ID` - Telegram login и уведомления.
+- `TG_BOT_TOKEN`, `TG_CHAT_ID` - вход через Telegram и уведомления. Домен сайта нужно указать боту в BotFather командой `/setdomain`.
 
 ### 4. Права Docker
 
@@ -227,8 +227,34 @@ docker compose ps -a
 Логи:
 
 ```bash
-docker compose up
+docker compose logs -f --tail=200 backend photo-worker
 ```
+
+Логи контейнеров ротируются автоматически (до 3 файлов по 10 МБ на контейнер), у каждого сервиса есть лимит памяти, а у `photo-worker` ещё и лимит CPU. Значения по умолчанию можно поменять в `.env` (блок `container resource limits`).
+
+### 6. Обновление
+
+```bash
+git pull
+docker compose build
+docker compose up -d
+docker image prune -f
+docker builder prune -f
+```
+
+Последние две команды удаляют старые образы и кэш сборки. Без них каждая пересборка оставляет на диске сотни мегабайт.
+
+> **Переход с версии на Traefik + nginx + RabbitMQ.** Обновляйтесь, когда нет загрузок в обработке: задачи из старой очереди RabbitMQ не переносятся. Старые контейнеры удаляются флагом `--remove-orphans`, Caddy при первом запуске сам выпустит новый сертификат:
+>
+> ```bash
+> docker compose up -d --build --remove-orphans
+> docker volume rm private-gallery_rabbitmqdata private-gallery_traefik-letsencrypt
+> ```
+
+### 7. Приватность
+
+- Caddy отдаёт Content-Security-Policy, `Referrer-Policy: strict-origin-when-cross-origin` (в S3 и на чужие сайты уходит только домен, без названий папок) и `X-Robots-Tag: noindex`. Укажите `S3_PUBLIC_ORIGIN` в `.env`, чтобы картинки и видео разрешались только с вашего хранилища.
+- Сессия не привязана к IP (`SESSION_BIND_IP=false`), иначе телефон выкидывает при смене сети. CSRF-защита: HMAC-токен сессии и проверка `Origin`. API ограничен по частоте запросов с одного IP.
 
 ## Для Кого
 

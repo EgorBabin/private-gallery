@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useCheckSession } from '@/hooks/useCheckSession';
 import { useTitle } from '@/hooks/useTitle';
 import styles from './GalleryList.module.css';
 import { Images } from 'lucide-react';
@@ -22,14 +21,8 @@ export default function GalleryList() {
   const Title = import.meta.env.VITE_NAME;
   useTitle(Title);
 
-  const { authenticated, loading: sessionLoading } = useCheckSession();
+  // отдельная проверка сессии не нужна: /cards сам ответит 401
   const nav = useNavigate();
-
-  useEffect(() => {
-    if (!sessionLoading && !authenticated) {
-      nav('/login');
-    }
-  }, [sessionLoading, authenticated, nav]);
 
   const [cards, setCards] = useState(null);
   const [imageAllCount, setImageAllCount] = useState(0);
@@ -72,7 +65,11 @@ export default function GalleryList() {
         setImageAllCount(
           fresh.reduce((sum, c) => sum + (c.imageCount || 0), 0),
         );
-        localStorage.setItem(LS_KEY, JSON.stringify({ cards: fresh }));
+        try {
+          localStorage.setItem(LS_KEY, JSON.stringify({ cards: fresh }));
+        } catch {
+          // переполнение или запрет localStorage не критичны
+        }
       })
       .catch((err) => {
         void err;
@@ -105,7 +102,7 @@ export default function GalleryList() {
       )}
       {cards === null
         ? skeletonCards
-        : cards.map((c) => {
+        : cards.map((c, index) => {
             const cardPath = c.path || `${c.year}/${c.category}`;
             return (
               <div
@@ -116,7 +113,13 @@ export default function GalleryList() {
                 <h1>{c.title || c.category}</h1>
                 <div>
                   {c.thumbnailUrl && (
-                    <img src={c.thumbnailUrl} alt="" className={styles.photo} />
+                    <img
+                      src={c.thumbnailUrl}
+                      alt=""
+                      className={styles.photo}
+                      loading={index < 4 ? 'eager' : 'lazy'}
+                      decoding="async"
+                    />
                   )}
                 </div>
                 <h2>

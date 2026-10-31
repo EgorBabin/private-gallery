@@ -1,9 +1,9 @@
 .overlay {
   position: fixed;
   inset: 0;
+  /* без backdrop-filter: размытие всей страницы под лайтбоксом
+     дорого для GPU телефона, фон просто почти непрозрачный */
   background: var(--color-lightbox-overlay);
-  -webkit-backdrop-filter: blur(12px);
-  backdrop-filter: blur(12px);
   z-index: 9999;
   display: flex;
   align-items: center;
@@ -26,19 +26,22 @@
   position: relative;
 }
 
+/* ширину слайда задаёт Swiper (slidesPerView) */
 .slide {
-  flex: 0 0 auto;
-  width: min(78vw, 1180px);
-  max-width: 1180px;
   height: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
   box-sizing: border-box;
   padding: 20px 0;
+  opacity: 0.45;
+  transition: opacity 180ms ease;
 }
 
-.picture,
+.slide:global(.swiper-slide-active) {
+  opacity: 1;
+}
+
 .videoWrap {
   width: auto;
   height: auto;
@@ -47,9 +50,6 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  transition:
-    filter 180ms ease,
-    opacity 180ms ease;
 }
 
 .image {
@@ -60,10 +60,6 @@
   max-width: 100%;
   object-fit: contain;
   border-radius: 10px;
-  transition:
-    transform 160ms ease,
-    filter 180ms ease,
-    opacity 180ms ease;
 }
 
 .video {
@@ -75,37 +71,6 @@
   object-fit: contain;
   border-radius: 10px;
   outline: none;
-  transition:
-    filter 180ms ease,
-    opacity 180ms ease;
-}
-
-.slideActive .picture,
-.slideActive .videoWrap,
-.slideActive .image,
-.slideActive .video {
-  filter: brightness(1);
-  opacity: 1;
-}
-
-.slideSide .picture,
-.slideSide .videoWrap,
-.slideSide .image,
-.slideSide .video {
-  filter: brightness(0.55);
-  opacity: 0.92;
-}
-
-.placeholder {
-  width: 100%;
-  height: auto;
-  max-height: 100%;
-  background: linear-gradient(
-    90deg,
-    var(--color-lightbox-placeholder-1) 25%,
-    var(--color-lightbox-placeholder-2) 37%,
-    var(--color-lightbox-placeholder-1) 63%
-  );
 }
 
 .swiper {
@@ -152,14 +117,6 @@
   justify-content: center;
   cursor: pointer;
   z-index: 10003;
-}
-
-:global(.swiper-scrollbar) {
-  background: var(--color-swiper-scrollbar);
-}
-
-:global(.swiper-scrollbar-drag) {
-  background: var(--color-swiper-scrollbar-drag);
 }
 
 :global(.swiper-button-prev),
@@ -214,19 +171,11 @@
 
 @media (max-width: 900px) {
   .slide {
-    width: 84vw;
-    max-width: none;
     padding: 12px 0;
   }
   :global(.swiper-button-prev),
   :global(.swiper-button-next) {
     width: 10%;
-  }
-}
-
-@media (max-width: 600px) {
-  .slide {
-    width: 88vw;
   }
 }
 
@@ -236,11 +185,9 @@
   }
 
   .slide {
-    width: 90vw;
     padding: 8px 0;
   }
 
-  .picture,
   .videoWrap {
     max-height: calc(100svh - 16px);
   }
@@ -257,7 +204,6 @@
 }
 
 @media (min-width: 1200px) {
-  .picture,
   .videoWrap {
     width: 100%;
     height: calc(100dvh - 48px);

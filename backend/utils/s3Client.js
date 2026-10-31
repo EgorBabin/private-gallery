@@ -8,11 +8,35 @@ import {
     CopyObjectCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl as awsGetSignedUrl } from '@aws-sdk/s3-request-presigner';
+import crypto from 'crypto';
 import path from 'path';
 
 const BUCKET = process.env.S3_BUCKET;
 const forcePath = process.env.S3_FORCE_PATH_STYLE === 'true';
 const IS_DEBUG_LOGS = (process.env.LOG_LEVEL || '').toLowerCase() === 'debug';
+
+// Кэш браузера для производных файлов (preview/screen-*): ключ меняется
+// вместе с содержимым через версию в подписи, поэтому можно кэшировать надолго.
+export const DERIVED_CACHE_CONTROL = 'private, max-age=31536000, immutable';
+
+// 1 час: браузерный кэш работает в течение визита, а утёкшая ссылка
+// живёт не дольше 2.5 часов
+const SIGNED_URL_WINDOW_DEFAULT_SEC = 60 * 60;
+const rawSignedUrlWindowSec = Number(
+    process.env.S3_SIGNED_URL_WINDOW_SEC || SIGNED_URL_WINDOW_DEFAULT_SEC,
+);
+// presigned URL живёт максимум 7 дней, ссылка живёт 2.5 окна
+const SIGNED_URL_WINDOW_SEC =
+    Number.isFinite(rawSignedUrlWindowSec) && rawSignedUrlWindowSec >= 60
+        ? Math.min(Math.floor(rawSignedUrlWindowSec), 2 * 24 * 60 * 60)
+        : SIGNED_URL_WINDOW_DEFAULT_SEC;
+const SIGNING_CLOCK_SKEW_SEC = 60;
+const RESPONSE_CACHE_CONTROL = String(
+    process.env.S3_RESPONSE_CACHE_CONTROL || '',
+).trim();
+const STABLE_URL_CACHE_MAX = 20000;
+const stableUrlCache = new Map();
+let stableUrlCacheWindowId = -1;
 
 const s3 = new S3Client({
     region: process.env.S3_REGION,
@@ -212,6 +236,70 @@ export async function getSignedUrlForKey(key, expiresInSec = 300, opts = {}) {
     return awsGetSignedUrl(s3, cmd, { expiresIn: expiresInSec });
 }
 
+function versionOffsetSec(version) {
+    if (!version) {
+        return 0;
+    }
+    const digest = crypto.createHash('sha1').update(String(version)).digest();
+    return digest.readUInt32BE(0) % Math.floor(SIGNED_URL_WINDOW_SEC / 2);
+}
+
+/**
+ * Подписанная ссылка, которая не меняется в пределах окна
+ * S3_SIGNED_URL_WINDOW_SEC: браузер может её закэшировать. `version`
+ * (обычно ETag preview) сдвигает дату подписи, поэтому после reorder или
+ * замены файла с тем же ключом ссылка тоже меняется. Без запросов к S3.
+ */
+export async function getStableSignedUrl(key, version = '') {
+    const windowMs = SIGNED_URL_WINDOW_SEC * 1000;
+    const windowId = Math.floor(Date.now() / windowMs);
+    if (
+        windowId !== stableUrlCacheWindowId ||
+        stableUrlCache.size >= STABLE_URL_CACHE_MAX
+    ) {
+        stableUrlCache.clear();
+        stableUrlCacheWindowId = windowId;
+    }
+
+    const memoKey = `${key}|${version || ''}`;
+    const cached = stableUrlCache.get(memoKey);
+    if (cached) {
+        return cached;
+    }
+
+    // дата подписи всегда в прошлом, ссылка действует минимум одно окно
+    const signingDate = new Date(
+        windowId * windowMs -
+            (SIGNING_CLOCK_SKEW_SEC + versionOffsetSec(version)) * 1000,
+    );
+    const cmd = new GetObjectCommand({
+        Bucket: BUCKET,
+        Key: key,
+        ...(RESPONSE_CACHE_CONTROL
+            ? { ResponseCacheControl: RESPONSE_CACHE_CONTROL }
+            : {}),
+    });
+    const url = await awsGetSignedUrl(s3, cmd, {
+        expiresIn: Math.ceil(SIGNED_URL_WINDOW_SEC * 2.5),
+        signingDate,
+    });
+    stableUrlCache.set(memoKey, url);
+    return url;
+}
+
+export async function listAllObjects(prefix) {
+    const objects = [];
+    let continuationToken;
+    do {
+        const page = await listObjects(prefix, 1000, continuationToken);
+        objects.push(...(page.Contents || []));
+        continuationToken = page.IsTruncated
+            ? page.NextContinuationToken || null
+            : null;
+    } while (continuationToken);
+    return objects;
+}
+
 const CONTENT_TYPES = {
     '.jpg': 'image/jpeg',
     '.jpeg': 'image/jpeg',
@@ -221,7 +309,8 @@ const CONTENT_TYPES = {
     '.json': 'application/json',
 };
 
-export async function uploadToS3(buffer, key, contentType) {
+export async function uploadToS3(buffer, key, contentType, opts = {}) {
+    const { cacheControl = null } = opts;
     let ct = contentType;
     if (!ct) {
         const ext = path.extname(key).toLowerCase();
@@ -233,6 +322,7 @@ export async function uploadToS3(buffer, key, contentType) {
         Key: key,
         Body: buffer,
         ContentType: ct,
+        ...(cacheControl ? { CacheControl: cacheControl } : {}),
     });
 
     return s3.send(cmd);

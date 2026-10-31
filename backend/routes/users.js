@@ -231,6 +231,18 @@ router.delete('/:id', async (req, res) => {
             });
         }
 
+        // открытые сессии удалённого пользователя закрываются сразу
+        await pool
+            .query(`DELETE FROM "session" WHERE sess->'user'->>'id' = $1`, [
+                String(id),
+            ])
+            .catch((err) => {
+                console.error(
+                    'Failed to drop sessions of deleted user:',
+                    err.message,
+                );
+            });
+
         sendSuccess(res, { message: 'Пользователь удалён' });
         logAction(req, 'Пользователь удалён', '#users.js');
     } catch (err) {

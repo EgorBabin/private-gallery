@@ -5,6 +5,12 @@ import { logAction } from '../utils/logger.js';
 
 const router = express.Router();
 
+// ошибки входа показываем на странице логина, а не сырым JSON
+function redirectToLoginError(res, code) {
+    const base = String(process.env.FRONTEND_URL || '').replace(/\/+$/, '');
+    return res.redirect(`${base}/login?error=${code}`);
+}
+
 const TG_FIELDS = [
     'id',
     'first_name',
@@ -59,7 +65,7 @@ router.get('/', async (req, res) => {
     }
 
     if (req.query.hash && req.query.id && req.query.auth_date) {
-        logAction(req, '📥 Telegram callback');
+        logAction(req, '📥 Telegram callback', '', { notify: false });
 
         const callbackState = String(req.query.state || '');
         const savedState = req.session?.telegramAuthState;
@@ -74,14 +80,14 @@ router.get('/', async (req, res) => {
                 TELEGRAM_STATE_MAX_AGE_MS;
         if (!isStateValid) {
             logAction(req, '❌ Невалидный state в Telegram callback');
-            return res.redirect(process.env.FRONTEND_URL);
+            return redirectToLoginError(res, 'failed');
         }
 
         const botToken = process.env.TG_BOT_TOKEN;
         const valid = verifyTelegramAuth(req.query, botToken);
         if (!valid) {
             logAction(req, '❌ Невалидный hash в Telegram callback');
-            return res.redirect(process.env.FRONTEND_URL);
+            return redirectToLoginError(res, 'failed');
         }
 
         const authDate = Number(req.query.auth_date);
@@ -93,7 +99,7 @@ router.get('/', async (req, res) => {
             authDate > now + 60
         ) {
             logAction(req, '⚠️ Устаревший auth_date в Telegram callback');
-            return res.redirect(process.env.FRONTEND_URL);
+            return redirectToLoginError(res, 'failed');
         }
 
         const tgID = String(req.query.id);
@@ -108,12 +114,18 @@ router.get('/', async (req, res) => {
                 '⚠️ Попытка повторного использования Telegram ссылки',
                 tgID,
             );
-            return res.redirect(process.env.FRONTEND_URL);
+            return redirectToLoginError(res, 'failed');
         }
         await pool.query(
             `INSERT INTO telegram_auth_used(tg_id, auth_date) VALUES($1,$2)`,
             [tgID, authDate],
         );
+        // записи старше MAX_AGE уже не пройдут проверку auth_date, хранить их незачем
+        pool.query(`DELETE FROM telegram_auth_used WHERE auth_date < $1`, [
+            now - MAX_AGE,
+        ]).catch((err) => {
+            console.error('Failed to prune telegram_auth_used:', err.message);
+        });
 
         try {
             const userQuery = `SELECT * FROM users WHERE telegramID = $1 LIMIT 1`;
@@ -121,26 +133,26 @@ router.get('/', async (req, res) => {
 
             if (rows.length === 0) {
                 logAction(req, '❌ Пользователь не найден (по ID)', tgID);
-                return res
-                    .status(401)
-                    .json({ error: 'Пользователь не найден', id: tgID });
+                return redirectToLoginError(res, 'not_found');
             }
 
             const user = rows[0];
+            if (user.is_active === false) {
+                logAction(req, '❌ Пользователь отключён', tgID);
+                return redirectToLoginError(res, 'not_found');
+            }
             const primaryEmail = Array.isArray(user.email)
                 ? user.email[0]
                 : user.email;
             if (typeof primaryEmail !== 'string' || !primaryEmail.trim()) {
                 logAction(req, '❌ У пользователя отсутствует email', tgID);
-                return res
-                    .status(401)
-                    .json({ error: 'У пользователя отсутствует email' });
+                return redirectToLoginError(res, 'not_found');
             }
 
             req.session.regenerate((err) => {
                 if (err) {
                     console.error('Ошибка сессии:', err);
-                    return res.status(500).json({ error: 'Session error' });
+                    return redirectToLoginError(res, 'failed');
                 }
 
                 req.session.user = {
@@ -171,9 +183,7 @@ router.get('/', async (req, res) => {
         } catch (err) {
             console.error(err);
             logAction(req, '❌ Ошибка авторизации через Telegram');
-            res.status(500).json({
-                error: 'Ошибка авторизации через Telegram',
-            });
+            redirectToLoginError(res, 'failed');
         }
         return;
     }
@@ -199,7 +209,12 @@ router.get('/state', (req, res) => {
             console.error('Failed to persist telegram auth state:', err);
             return res.status(500).json({ error: 'Session error' });
         }
-        return res.json({ state });
+        // id бота публичный (первая часть токена), нужен для входа без виджета
+        const botId = String(process.env.TG_BOT_TOKEN || '').split(':')[0];
+        return res.json({
+            state,
+            botId: /^[0-9]+$/.test(botId) ? botId : null,
+        });
     });
 });
 

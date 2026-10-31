@@ -6,7 +6,7 @@ const router = express.Router();
 
 router.get('/hello', (req, res) => {
     res.json({ message: 'Hello from backend!' });
-    logAction(req, '👋 API Hello');
+    logAction(req, '👋 API Hello', '', { notify: false });
 });
 
 export default router;

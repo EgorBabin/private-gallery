@@ -1,15 +1,13 @@
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
 import useragent from 'express-useragent';
 
 // роутер
-// await logAction(req, 'Создание чего-то важного', { someId: 123 })
+// logAction(req, 'Создание чего-то важного', { someId: 123 })
+// logAction(req, 'Шумное событие', '', { notify: false }) // только stdout
 // логика
 // res.json({ ok: true })
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const logPath = path.join(__dirname, '../logs/activity.log');
+//
+// Журнал пишется в stdout (Docker ротирует его сам, см. docker-compose.yaml),
+// в Telegram уходят только важные события с ограничением частоты.
 
 const TELEGRAM_BOT_TOKEN = process.env.TG_BOT_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TG_CHAT_ID;
@@ -25,10 +23,15 @@ const SENSITIVE_QUERY_KEYS = new Set([
     'token',
 ]);
 
-// Создаём папку, если не существует
-if (!fs.existsSync(path.dirname(logPath))) {
-    fs.mkdirSync(path.dirname(logPath), { recursive: true });
-}
+// Telegram пропускает в группу ~20 сообщений в минуту, поэтому шлём
+// не чаще одного раза в TELEGRAM_MIN_INTERVAL_MS и держим ограниченную очередь.
+const TELEGRAM_MIN_INTERVAL_MS = 3100;
+const TELEGRAM_QUEUE_LIMIT = 30;
+const TELEGRAM_TIMEOUT_MS = 5000;
+
+const telegramQueue = [];
+let telegramDropped = 0;
+let telegramPumping = false;
 
 function getDeviceType(req) {
     const source = req.headers['user-agent'];
@@ -36,27 +39,76 @@ function getDeviceType(req) {
     return ua.isMobile ? 'Mobile' : 'PC';
 }
 
-async function sendToTelegram(message) {
+function sleep(ms) {
+    return new Promise((resolve) => {
+        setTimeout(resolve, ms);
+    });
+}
+
+async function postToTelegram(message) {
+    const res = await fetch(
+        `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`,
+        {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                chat_id: TELEGRAM_CHAT_ID,
+                text: message,
+                parse_mode: 'HTML',
+            }),
+            signal: AbortSignal.timeout(TELEGRAM_TIMEOUT_MS),
+        },
+    );
+
+    if (res.ok) {
+        return 0;
+    }
+
+    const body = await res.json().catch(() => null);
+    const retryAfterSec = Number(body?.parameters?.retry_after) || 0;
+    console.error('Telegram отклонил сообщение:', res.status, body?.description);
+    return retryAfterSec * 1000;
+}
+
+async function pumpTelegramQueue() {
+    if (telegramPumping) {
+        return;
+    }
+    telegramPumping = true;
+
+    try {
+        while (telegramQueue.length > 0) {
+            let message = telegramQueue.shift();
+            if (telegramDropped > 0) {
+                message += `\n\n<i>Пропущено уведомлений: ${telegramDropped}</i>`;
+                telegramDropped = 0;
+            }
+
+            let pauseMs = TELEGRAM_MIN_INTERVAL_MS;
+            try {
+                pauseMs = Math.max(pauseMs, await postToTelegram(message));
+            } catch (err) {
+                console.error('Ошибка отправки в Telegram:', err.message);
+            }
+            await sleep(pauseMs);
+        }
+    } finally {
+        telegramPumping = false;
+    }
+}
+
+function sendToTelegram(message) {
     if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) {
         return;
     }
 
-    try {
-        await fetch(
-            `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`,
-            {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    chat_id: TELEGRAM_CHAT_ID,
-                    text: message,
-                    parse_mode: 'HTML',
-                }),
-            },
-        );
-    } catch (err) {
-        console.error('Ошибка отправки в Telegram:', err);
+    if (telegramQueue.length >= TELEGRAM_QUEUE_LIMIT) {
+        telegramDropped += 1;
+        return;
     }
+
+    telegramQueue.push(message);
+    void pumpTelegramQueue();
 }
 
 function escapeTelegramHtml(value) {
@@ -97,7 +149,7 @@ function shouldSendUrlToTelegram(pathname) {
     return !AUTH_ROUTE_RE.test(String(pathname || ''));
 }
 
-export async function logAction(req, action, extra = {}) {
+export function logAction(req, action, extra = {}, { notify = true } = {}) {
     const timestamp = new Date().toLocaleString('ru-RU', {
         timeZone: 'Europe/Moscow',
     });
@@ -119,13 +171,13 @@ export async function logAction(req, action, extra = {}) {
         extra && Object.keys(extra).length
             ? ` | Extra: ${JSON.stringify(extra)}`
             : '';
-    const logEntry = `[${timestamp}] IP: ${ip} | ${method} ${sanitizedUrl} | ${device} | Email: ${email} | Auth: ${authType} | Action: ${action}${extra && Object.keys(extra).length ? ` | Extra: ${JSON.stringify(extra)}` : ''}\n`;
+    const logEntry = `[activity] [${timestamp}] IP: ${ip} | ${method} ${sanitizedUrl} | ${device} | Email: ${email} | Auth: ${authType} | Action: ${action}${extraData}`;
 
-    fs.appendFile(logPath, logEntry, (err) => {
-        if (err) {
-            console.error('Ошибка записи лога:', err);
-        }
-    });
+    console.log(logEntry);
+
+    if (!notify) {
+        return;
+    }
 
     const lines = [
         `<b>${escapeTelegramHtml(action)}</b>`,
@@ -147,5 +199,5 @@ export async function logAction(req, action, extra = {}) {
     }
 
     const tgMessage = lines.join('\n');
-    await sendToTelegram(tgMessage);
+    sendToTelegram(tgMessage);
 }

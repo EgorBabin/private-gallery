@@ -1,17 +1,14 @@
 import 'dotenv/config';
-import { createPhotoConsumerChannel } from './utils/rabbitmq.js';
+import {
+    JOB_MAX_ATTEMPTS,
+    claimNextJob,
+    completeJob,
+    listenForJobs,
+    releaseJob,
+} from './utils/jobQueue.js';
 import { processPhotoJob } from './workers/photoJobProcessor.js';
 import { startSoftDeleteSweeper } from './workers/softDeleteSweeper.js';
 import { startGalleryCacheRefresher } from './workers/galleryCacheRefresher.js';
-
-const PREFETCH_DEFAULT = 1;
-const rawPrefetch = Number(
-    process.env.PHOTO_WORKER_PREFETCH || PREFETCH_DEFAULT,
-);
-const prefetch =
-    Number.isInteger(rawPrefetch) && rawPrefetch > 0
-        ? rawPrefetch
-        : PREFETCH_DEFAULT;
 
 const RETRY_DELAY_DEFAULT_MS = 3000;
 const rawRetryDelayMs = Number(
@@ -21,12 +18,17 @@ const retryDelayMs =
     Number.isFinite(rawRetryDelayMs) && rawRetryDelayMs > 0
         ? Math.floor(rawRetryDelayMs)
         : RETRY_DELAY_DEFAULT_MS;
+// страховка на случай пропущенного NOTIFY (например, во время переподключения)
+const POLL_INTERVAL_MS = 30 * 1000;
 
 let isShuttingDown = false;
-let activeConnection = null;
-let activeChannel = null;
 let stopSoftDeleteSweeper = null;
 let stopGalleryCacheRefresher = null;
+let stopListening = null;
+let pollTimer = null;
+let currentJobId = null;
+let draining = false;
+let drainRequested = false;
 
 function sleep(ms) {
     return new Promise((resolve) => {
@@ -34,109 +36,88 @@ function sleep(ms) {
     });
 }
 
-async function closeActiveResources() {
-    const channel = activeChannel;
-    const connection = activeConnection;
-    activeChannel = null;
-    activeConnection = null;
+async function runJob(job) {
+    const payload = job.payload || {};
+    const jobType = String(payload.jobType || 'photo-upload');
 
-    if (channel) {
-        try {
-            await channel.close();
-        } catch (err) {
-            void err;
-        }
+    if (job.attempts > JOB_MAX_ATTEMPTS) {
+        console.error('[photo-worker] Job exceeded attempts, dropping', {
+            id: job.id,
+            jobType,
+        });
+        await completeJob(job.id);
+        return;
     }
 
-    if (connection) {
-        try {
-            await connection.close();
-        } catch (err) {
-            void err;
+    currentJobId = job.id;
+    try {
+        const result = await processPhotoJob(payload);
+        if (jobType !== 'photo-upload') {
+            console.log('[photo-worker] Job completed', { jobType, result });
         }
+    } catch (err) {
+        // Do not retry invalid/unprocessable data forever.
+        console.error('[photo-worker] Photo processing failed:', err);
+    } finally {
+        currentJobId = null;
+    }
+
+    // задача отработала (успешно или с ошибкой) — удаляем, как ack в RabbitMQ
+    await completeJob(job.id);
+}
+
+// Обрабатываем задачи по одной, пока очередь не опустеет.
+async function drainQueue() {
+    if (draining) {
+        drainRequested = true;
+        return;
+    }
+    draining = true;
+    try {
+        do {
+            drainRequested = false;
+            while (!isShuttingDown) {
+                const job = await claimNextJob();
+                if (!job) {
+                    break;
+                }
+                await runJob(job);
+            }
+        } while (drainRequested && !isShuttingDown);
+    } catch (err) {
+        console.error('[photo-worker] Queue error:', err.message);
+    } finally {
+        draining = false;
     }
 }
 
-async function runConsumeSession() {
-    const { connection, channel, queue } =
-        await createPhotoConsumerChannel(prefetch);
-    activeConnection = connection;
-    activeChannel = channel;
-
-    return new Promise((resolve, reject) => {
-        let settled = false;
-        const done = (fn, value) => {
-            if (settled) {
-                return;
-            }
-            settled = true;
-            fn(value);
-        };
-
-        connection.on('error', (err) => {
-            console.error('[photo-worker] RabbitMQ connection error:', err);
-        });
-
-        connection.on('close', () => {
-            if (isShuttingDown) {
-                done(resolve);
-                return;
-            }
-            done(reject, new Error('RabbitMQ connection closed'));
-        });
-
-        channel
-            .consume(
-                queue,
-                async (message) => {
-                    if (!message) {
-                        return;
-                    }
-
-                    let payload;
-                    try {
-                        payload = JSON.parse(message.content.toString('utf8'));
-                    } catch (parseErr) {
-                        console.error(
-                            '[photo-worker] Invalid queue message JSON, dropping:',
-                            parseErr,
-                        );
-                        channel.ack(message);
-                        return;
-                    }
-
-                    try {
-                        const result = await processPhotoJob(payload);
-                        const jobType = String(
-                            payload?.jobType || 'photo-upload',
-                        );
-                        if (jobType !== 'photo-upload') {
-                            console.log('[photo-worker] Job completed', {
-                                jobType,
-                                result,
-                            });
-                        }
-                        channel.ack(message);
-                    } catch (err) {
-                        console.error(
-                            '[photo-worker] Photo processing failed:',
-                            err,
-                        );
-                        // Do not requeue invalid/unprocessable data forever.
-                        channel.ack(message);
+async function subscribe() {
+    while (!isShuttingDown) {
+        try {
+            stopListening = await listenForJobs(
+                () => void drainQueue(),
+                (err) => {
+                    console.error(
+                        '[photo-worker] Queue listener lost:',
+                        err.message,
+                    );
+                    stopListening = null;
+                    if (!isShuttingDown) {
+                        void sleep(retryDelayMs).then(subscribe);
                     }
                 },
-                { noAck: false },
-            )
-            .then(() => {
-                console.log(
-                    `[photo-worker] Listening queue "${queue}" with prefetch=${prefetch}`,
-                );
-            })
-            .catch((err) => {
-                done(reject, err);
-            });
-    });
+            );
+            console.log('[photo-worker] Listening for jobs in PostgreSQL');
+            void drainQueue();
+            return;
+        } catch (err) {
+            console.error(
+                `[photo-worker] PostgreSQL unavailable. Retry in ${retryDelayMs}ms.`,
+                err.message,
+            );
+            await sleep(retryDelayMs);
+        }
+    }
 }
 
 async function gracefulShutdown(signal) {
@@ -145,24 +126,36 @@ async function gracefulShutdown(signal) {
     }
     isShuttingDown = true;
     console.log(`[photo-worker] Received ${signal}, shutting down...`);
-    if (stopSoftDeleteSweeper) {
+
+    if (pollTimer) {
+        clearInterval(pollTimer);
+    }
+    for (const stop of [
+        stopSoftDeleteSweeper,
+        stopGalleryCacheRefresher,
+        stopListening,
+    ]) {
+        if (!stop) {
+            continue;
+        }
         try {
-            await stopSoftDeleteSweeper();
+            await stop();
         } catch (err) {
             console.error(
-                '[photo-worker] Failed to stop soft-delete sweeper:',
+                '[photo-worker] Failed to stop background task:',
                 err,
             );
         }
     }
-    if (stopGalleryCacheRefresher) {
+
+    // незавершённую задачу возвращаем в очередь, её возьмёт следующий запуск
+    if (currentJobId) {
         try {
-            await stopGalleryCacheRefresher();
+            await releaseJob(currentJobId);
         } catch (err) {
-            console.error('[photo-worker] Failed to stop gallery cache refresher:', err);
+            console.error('[photo-worker] Failed to release job:', err.message);
         }
     }
-    await closeActiveResources();
     process.exit(0);
 }
 
@@ -176,22 +169,8 @@ process.on('SIGTERM', () => {
 async function main() {
     stopSoftDeleteSweeper = startSoftDeleteSweeper();
     stopGalleryCacheRefresher = startGalleryCacheRefresher();
-
-    while (!isShuttingDown) {
-        try {
-            await runConsumeSession();
-        } catch (err) {
-            if (isShuttingDown) {
-                break;
-            }
-            console.error(
-                `[photo-worker] RabbitMQ unavailable. Retry in ${retryDelayMs}ms.`,
-                err,
-            );
-            await closeActiveResources();
-            await sleep(retryDelayMs);
-        }
-    }
+    pollTimer = setInterval(() => void drainQueue(), POLL_INTERVAL_MS);
+    await subscribe();
 }
 
 main().catch((err) => {

@@ -4,6 +4,12 @@ import pool from '../db.js';
 import { logAction } from '../utils/logger.js';
 
 const router = express.Router();
+
+// ошибки входа показываем на странице логина, а не сырым JSON
+function redirectToLoginError(res, code) {
+    const base = String(process.env.FRONTEND_URL || '').replace(/\/+$/, '');
+    return res.redirect(`${base}/login?error=${code}`);
+}
 const OAUTH_STATE_MAX_AGE_MS = 10 * 60 * 1000;
 
 router.get('/', (req, res) => {
@@ -11,7 +17,7 @@ router.get('/', (req, res) => {
         return res.redirect(process.env.FRONTEND_URL);
     }
 
-    logAction(req, '👁️‍🗨️ Yandex');
+    logAction(req, '👁️‍🗨️ Yandex', '', { notify: false });
     const remember = req.query.remember === '1' ? '1' : '0';
     const state = crypto.randomBytes(24).toString('hex');
     req.session.yandexAuthState = {
@@ -31,7 +37,7 @@ router.get('/', (req, res) => {
     req.session.save((err) => {
         if (err) {
             console.error('Failed to persist yandex oauth state:', err);
-            return res.status(500).json({ error: 'Session error' });
+            return redirectToLoginError(res, 'failed');
         }
         return res.redirect(redirectUri);
     });
@@ -56,10 +62,10 @@ router.get('/callback', async (req, res) => {
 
     if (!code || !isStateValid) {
         logAction(req, '⚠️ Невалидный OAuth callback (code/state)', 'Yandex');
-        return res.redirect(process.env.FRONTEND_URL);
+        return redirectToLoginError(res, 'failed');
     }
 
-    logAction(req, '📥 Получение данных', 'Yandex');
+    logAction(req, '📥 Получение данных', 'Yandex', { notify: false });
 
     try {
         const tokenRes = await fetch('https://oauth.yandex.ru/token', {
@@ -115,15 +121,17 @@ router.get('/callback', async (req, res) => {
 
         if (rows.length === 0) {
             logAction(req, '❌ Пользователь не найден', email);
-            return res
-                .status(401)
-                .json({ error: 'Пользователь не найден ', email });
+            return redirectToLoginError(res, 'not_found');
+        }
+        if (rows[0].is_active === false) {
+            logAction(req, '❌ Пользователь отключён', email);
+            return redirectToLoginError(res, 'not_found');
         }
 
         req.session.regenerate((err) => {
             if (err) {
                 console.error('Ошибка сессии:', err);
-                return res.status(500).json({ error: 'Session error' });
+                return redirectToLoginError(res, 'failed');
             }
 
             req.session.user = {
@@ -151,7 +159,7 @@ router.get('/callback', async (req, res) => {
     } catch (err) {
         console.error(err);
         logAction(req, '❌ Ошибка авторизации через Яндекс');
-        res.status(500).json({ error: 'Ошибка авторизации через Яндекс' });
+        redirectToLoginError(res, 'failed');
     }
 });
 

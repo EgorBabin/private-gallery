@@ -1,45 +1,46 @@
 import Redis from 'ioredis';
 
 const redisUrl = process.env.REDIS_URL || null;
+
+// Кэш необязателен: пока Redis недоступен, команды сразу падают
+// (enableOfflineQueue: false), а клиент сам переподключается в фоне.
+const COMMON_OPTIONS = {
+    retryStrategy: (times) => Math.min(times * 500, 5000),
+    enableOfflineQueue: false,
+    maxRetriesPerRequest: 1,
+    connectTimeout: 3000,
+};
+
 let client = null;
-let isRedisEnabled = false;
+let lastErrorLogged = false;
 
 try {
     if (redisUrl) {
-        client = new Redis(redisUrl, {
-            retryStrategy: () => null, // disable retry, graceful fail instead
-            enableOfflineQueue: false,
-            maxRetriesPerRequest: null,
-        });
-        isRedisEnabled = true;
+        client = new Redis(redisUrl, COMMON_OPTIONS);
     } else if (process.env.REDIS_HOST) {
         client = new Redis({
             host: process.env.REDIS_HOST,
             port: Number(process.env.REDIS_PORT || 6379),
             password: process.env.REDIS_PASSWORD || undefined,
-            retryStrategy: () => null,
-            enableOfflineQueue: false,
-            maxRetriesPerRequest: null,
+            ...COMMON_OPTIONS,
         });
-        isRedisEnabled = true;
     }
 
-    // Add error handler to suppress unhandled error events
     if (client) {
         client.on('error', (err) => {
-            if (isRedisEnabled) {
-                console.warn('[Redis] Connection error (cache disabled until restored):', err.message);
-                client = null; // disable client on error
+            // одно сообщение на обрыв, а не на каждую попытку переподключения
+            if (!lastErrorLogged) {
+                console.warn(
+                    '[Redis] Connection error, cache disabled until reconnect:',
+                    err.message,
+                );
+                lastErrorLogged = true;
             }
         });
 
-        client.on('connect', () => {
+        client.on('ready', () => {
             console.log('[Redis] Connected');
-        });
-
-        client.on('close', () => {
-            console.log('[Redis] Connection closed');
-            client = null;
+            lastErrorLogged = false;
         });
     }
 } catch (err) {
@@ -48,7 +49,7 @@ try {
 }
 
 export function getRedisClient() {
-    return client;
+    return client && client.status === 'ready' ? client : null;
 }
 
 export default getRedisClient;

@@ -1,8 +1,35 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import styles from './Header.module.css';
-import { Film, ArrowUpToLine, Users, FolderCog } from 'lucide-react';
+import { Film, ArrowUpToLine, Users, FolderCog, LogOut } from 'lucide-react';
 import { useVibration } from '@/hooks/useVibration';
+import { useCheckSession } from '@/hooks/useCheckSession';
+
+// Выход: сессия на сервере и всё, что галерея сохранила на устройстве
+// (кэш папок со ссылками на фото), чтобы на общем телефоне ничего не осталось.
+async function logout() {
+  try {
+    const tokenRes = await fetch('/api/csrf-token', { credentials: 'include' });
+    const { csrfToken } = await tokenRes.json();
+    await fetch('/api/logout', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'X-CSRF-Token': csrfToken },
+    });
+  } catch {
+    // локальные данные чистим в любом случае
+  }
+  try {
+    for (const key of Object.keys(localStorage)) {
+      if (key.startsWith('gallery_')) localStorage.removeItem(key);
+    }
+    sessionStorage.clear();
+  } catch {
+    // хранилище недоступно
+  }
+  // полная перезагрузка сбрасывает всё, что осталось в памяти страницы
+  window.location.replace('/login');
+}
 
 export default function Header() {
   const vibrate = useVibration();
@@ -35,6 +62,15 @@ export default function Header() {
   const isScrollingRef = useRef(false);
   const scrollControllerRef = useRef(null);
   const isRoot = isRootPath;
+  // ссылки на админку видны только админу (доступ всё равно проверяет сервер)
+  const { authenticated, user } = useCheckSession();
+  const isAdmin = String(user?.role || '').toLowerCase() === 'admin';
+
+  const handleLogout = (e) => {
+    e.preventDefault();
+    vibrate('click');
+    void logout();
+  };
 
   useEffect(() => {
     const onScroll = () => {
@@ -148,29 +184,44 @@ export default function Header() {
             )}
           </Link>
 
-          <Link
-            to={editPath}
-            onClick={(e) => {
-              if (isAdminPath) {
-                e.preventDefault();
-                return;
-              }
-              vibrate('click');
-            }}
-            className={editLinkClassName}
-            aria-disabled={isAdminPath}
-            tabIndex={isAdminPath ? -1 : undefined}
-          >
-            <FolderCog />
-          </Link>
+          {isAdmin && (
+            <Link
+              to={editPath}
+              onClick={(e) => {
+                if (isAdminPath) {
+                  e.preventDefault();
+                  return;
+                }
+                vibrate('click');
+              }}
+              className={editLinkClassName}
+              aria-disabled={isAdminPath}
+              tabIndex={isAdminPath ? -1 : undefined}
+            >
+              <FolderCog />
+            </Link>
+          )}
 
-          <Link
-            to="/admin"
-            onClick={() => vibrate('click')}
-            className={adminLinkClassName}
-          >
-            <Users />
-          </Link>
+          {isAdmin && (
+            <Link
+              to="/admin"
+              onClick={() => vibrate('click')}
+              className={adminLinkClassName}
+            >
+              <Users />
+            </Link>
+          )}
+
+          {authenticated && (
+            <a
+              href="/login"
+              onClick={handleLogout}
+              aria-label="Выйти"
+              title="Выйти"
+            >
+              <LogOut />
+            </a>
+          )}
         </nav>
       </header>
     </>
