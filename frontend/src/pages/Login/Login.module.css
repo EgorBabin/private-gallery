@@ -42,16 +42,6 @@
   color: var(--color-text-secondary);
 }
 
-.error {
-  margin: 0;
-  padding: 10px 12px;
-  border-radius: 10px;
-  font-size: 14px;
-  color: var(--color-text-primary);
-  background: var(--color-login-error-bg);
-  border: 1px solid var(--color-login-error-border);
-}
-
 .buttons {
   display: flex;
   flex-direction: column;
@@ -95,6 +85,13 @@
 .button[aria-disabled='true'] {
   cursor: default;
   opacity: 0.7;
+}
+
+/* тёмный вариант кнопки по правилам оформления Google Sign-In */
+.google {
+  background: #131314;
+  border-color: #8e918f;
+  color: #e3e3e3;
 }
 
 .telegram {

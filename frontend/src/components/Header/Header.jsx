@@ -4,6 +4,7 @@ import styles from './Header.module.css';
 import { Film, ArrowUpToLine, Users, FolderCog, LogOut } from 'lucide-react';
 import { useVibration } from '@/hooks/useVibration';
 import { useCheckSession } from '@/hooks/useCheckSession';
+import { confirmLeave } from '@/hooks/useUnsavedGuard';
 
 // Выход: сессия на сервере и всё, что галерея сохранила на устройстве
 // (кэш папок со ссылками на фото), чтобы на общем телефоне ничего не осталось.
@@ -68,6 +69,7 @@ export default function Header() {
 
   const handleLogout = (e) => {
     e.preventDefault();
+    if (!confirmLeave()) return;
     vibrate('click');
     void logout();
   };
@@ -125,6 +127,7 @@ export default function Header() {
 
   const handleMainClick = (e) => {
     e.preventDefault();
+    if (!confirmLeave()) return;
     vibrate('click');
 
     const currentlyScrolled = window.scrollY > 10;
@@ -188,7 +191,7 @@ export default function Header() {
             <Link
               to={editPath}
               onClick={(e) => {
-                if (isAdminPath) {
+                if (isAdminPath || !confirmLeave()) {
                   e.preventDefault();
                   return;
                 }
@@ -205,7 +208,13 @@ export default function Header() {
           {isAdmin && (
             <Link
               to="/admin"
-              onClick={() => vibrate('click')}
+              onClick={(e) => {
+                if (!confirmLeave()) {
+                  e.preventDefault();
+                  return;
+                }
+                vibrate('click');
+              }}
               className={adminLinkClassName}
             >
               <Users />

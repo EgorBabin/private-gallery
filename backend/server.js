@@ -16,6 +16,10 @@ import checkWork from './routes/hello.js';
 import usersRoutes from './routes/users.js';
 import telegramRoutes from './routes/telegram.js';
 import yandexRoutes from './routes/yandex.js';
+import googleRoutes from './routes/google.js';
+import adminRoutes from './routes/admin.js';
+import { logAction } from './utils/logger.js';
+import { ensureSchema } from './utils/schema.js';
 import authCheck from './utils/authCheck.js';
 import requireRole from './utils/requireRole.js';
 
@@ -43,7 +47,7 @@ app.use(
     rateLimit({ windowMs: 60 * 1000, max: RATE_LIMIT_PER_MINUTE }),
 );
 app.use(
-    ['/api/telegram', '/api/yandex'],
+    ['/api/google', '/api/telegram', '/api/yandex'],
     rateLimit({ windowMs: 10 * 60 * 1000, max: 30 }),
 );
 
@@ -96,6 +100,12 @@ app.post('/api/logout', (req, res) => {
     if (!req.session) {
         return finish();
     }
+    if (req.session.user) {
+        logAction(req, '🚪 Выход из аккаунта', '', {
+            notify: false,
+            category: 'auth',
+        });
+    }
     req.session.destroy((err) => {
         if (err) {
             console.error('Logout failed:', err.message);
@@ -111,9 +121,11 @@ app.use(useragent.express());
 app.use('/api/', checkWork);
 app.use('/api/telegram/', telegramRoutes);
 app.use('/api/yandex/', yandexRoutes);
+app.use('/api/google/', googleRoutes);
 app.use('/api/check-session', authCheck);
 
 app.use('/api/users/', checkSession(), requireAdmin, usersRoutes);
+app.use('/api/admin/', checkSession(), requireAdmin, adminRoutes);
 app.use('/api/gallery', checkSession(), galleryRoutes);
 app.use('/api/gallery', checkSession(), requireAdmin, galleryEditRoutes);
 
@@ -121,6 +133,11 @@ app.use((err, req, res, next) => {
     void next;
     console.error(err.stack);
     res.status(500).json({ error: 'Internal Server Error' });
+});
+
+// новые таблицы и колонки для уже существующей базы (журнал, статистика)
+ensureSchema().catch((err) => {
+    console.error('Schema migration failed:', err.message);
 });
 
 app.listen(3000, () => {

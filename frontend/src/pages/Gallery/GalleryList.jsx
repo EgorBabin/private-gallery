@@ -6,6 +6,9 @@ import { Images } from 'lucide-react';
 
 const API = '/api/gallery';
 const LS_KEY = 'gallery_cards_cache';
+// подписанные ссылки на обложки живут минимум час после получения (окно
+// S3_SIGNED_URL_WINDOW_SEC): более старый кэш показываем без обложек
+const LS_THUMBNAILS_MAX_AGE_MS = 50 * 60 * 1000;
 
 function sortCardsDesc(list) {
   return (Array.isArray(list) ? list : [])
@@ -30,20 +33,23 @@ export default function GalleryList() {
   useEffect(() => {
     let mounted = true;
 
-    const cached = localStorage.getItem(LS_KEY);
-    if (cached) {
-      try {
-        const parsed = JSON.parse(cached);
-        if (Array.isArray(parsed.cards) && mounted) {
-          const cachedCards = sortCardsDesc(parsed.cards);
-          setCards(cachedCards);
-          setImageAllCount(
-            cachedCards.reduce((sum, c) => sum + (c.imageCount || 0), 0),
-          );
-        }
-      } catch (err) {
-        void err;
+    try {
+      const parsed = JSON.parse(localStorage.getItem(LS_KEY) || 'null');
+      if (Array.isArray(parsed?.cards) && mounted) {
+        const thumbnailsFresh =
+          Date.now() - Number(parsed.savedAt || 0) < LS_THUMBNAILS_MAX_AGE_MS;
+        const cachedCards = sortCardsDesc(
+          thumbnailsFresh
+            ? parsed.cards
+            : parsed.cards.map((c) => ({ ...c, thumbnailUrl: null })),
+        );
+        setCards(cachedCards);
+        setImageAllCount(
+          cachedCards.reduce((sum, c) => sum + (c.imageCount || 0), 0),
+        );
       }
+    } catch {
+      // нет доступа к localStorage или повреждённый кэш
     }
 
     fetch(`${API}/cards`, {
@@ -66,7 +72,10 @@ export default function GalleryList() {
           fresh.reduce((sum, c) => sum + (c.imageCount || 0), 0),
         );
         try {
-          localStorage.setItem(LS_KEY, JSON.stringify({ cards: fresh }));
+          localStorage.setItem(
+            LS_KEY,
+            JSON.stringify({ cards: fresh, savedAt: Date.now() }),
+          );
         } catch {
           // переполнение или запрет localStorage не критичны
         }

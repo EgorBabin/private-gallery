@@ -306,6 +306,14 @@ const CONTENT_TYPES = {
     '.png': 'image/png',
     '.webp': 'image/webp',
     '.avif': 'image/avif',
+    '.gif': 'image/gif',
+    '.tif': 'image/tiff',
+    '.tiff': 'image/tiff',
+    '.heic': 'image/heic',
+    '.heif': 'image/heif',
+    '.hif': 'image/heif',
+    '.dng': 'image/x-adobe-dng',
+    // остальные RAW камер отдаются как application/octet-stream (скачивание)
     '.json': 'application/json',
 };
 

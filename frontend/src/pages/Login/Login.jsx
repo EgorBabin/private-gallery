@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Send } from 'lucide-react';
 
 import { useCheckSession } from '@/hooks/useCheckSession';
 import { useTitle } from '@/hooks/useTitle';
+import { notify } from '@/utils/notifications';
 import styles from './Login.module.css';
 
 // Вход через Telegram без виджета (без стороннего скрипта и iframe):
@@ -21,11 +22,24 @@ const TG_FIELDS = [
   'hash',
 ];
 
-const ERROR_MESSAGES = {
-  not_found:
-    'Этот аккаунт не добавлен в галерею. Попросите администратора добавить вас.',
-  failed: 'Не удалось войти. Попробуйте ещё раз.',
+// ошибки входа показываются тостами Sileo, как и остальные уведомления
+const LOGIN_ERRORS = {
+  not_found: {
+    status: 'warning',
+    title: 'Нет доступа',
+    message:
+      'Этот аккаунт не добавлен в галерею. Попросите администратора добавить вас.',
+  },
+  failed: {
+    status: 'error',
+    title: 'Не удалось войти',
+    message: 'Попробуйте ещё раз.',
+  },
 };
+
+function notifyLoginError(code) {
+  notify(LOGIN_ERRORS[code] || LOGIN_ERRORS.failed);
+}
 
 function decodeBase64Json(value) {
   const normalized = value.replace(/-/g, '+').replace(/_/g, '/');
@@ -60,6 +74,31 @@ function TelegramIcon() {
   return <Send className={styles.icon} aria-hidden="true" />;
 }
 
+// Логотип Google по правилам оформления кнопки входа; локальный SVG,
+// без загрузки чего-либо с серверов Google
+function GoogleIcon() {
+  return (
+    <svg className={styles.icon} viewBox="0 0 48 48" aria-hidden="true">
+      <path
+        fill="#EA4335"
+        d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"
+      />
+      <path
+        fill="#4285F4"
+        d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"
+      />
+      <path
+        fill="#FBBC05"
+        d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"
+      />
+      <path
+        fill="#34A853"
+        d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"
+      />
+    </svg>
+  );
+}
+
 function YandexIcon() {
   return (
     <span className={styles.yandexMark} aria-hidden="true">
@@ -74,9 +113,21 @@ export default function Login() {
   const { authenticated, loading } = useCheckSession();
   const [remember, setRemember] = useState(false);
   const [pending, setPending] = useState(null);
-  const [searchParams] = useSearchParams();
-  const [error, setError] = useState(() => searchParams.get('error'));
+  const [searchParams, setSearchParams] = useSearchParams();
+  const errorShownRef = useRef(false);
   const navigate = useNavigate();
+
+  // ?error=... от бэкенда: показываем тост один раз и убираем параметр из
+  // адреса, чтобы он не появлялся снова при обновлении страницы
+  useEffect(() => {
+    const code = searchParams.get('error');
+    if (!code || errorShownRef.current) return;
+    errorShownRef.current = true;
+    notifyLoginError(code);
+    const next = new URLSearchParams(searchParams);
+    next.delete('error');
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
 
   useEffect(() => {
     if (!loading && authenticated) {
@@ -106,7 +157,7 @@ export default function Login() {
 
     const state = sessionStorageGet(TG_STATE_KEY);
     if (!result || !state) {
-      setError('failed');
+      notifyLoginError('failed');
       return;
     }
 
@@ -123,7 +174,6 @@ export default function Login() {
   }, []);
 
   const startTelegram = async () => {
-    setError(null);
     setPending('telegram');
     try {
       const res = await fetch(
@@ -145,12 +195,22 @@ export default function Login() {
       window.location.assign(url.toString());
     } catch {
       setPending(null);
-      setError('failed');
+      notifyLoginError('failed');
     }
   };
 
-  const yandexHref = `/api/yandex${remember ? '?remember=1' : ''}`;
   const busy = pending !== null;
+  const rememberQuery = remember ? '?remember=1' : '';
+  const googleHref = `/api/google${rememberQuery}`;
+  const yandexHref = `/api/yandex${rememberQuery}`;
+  // переход по ссылке на OAuth: блокируем повторные нажатия
+  const startRedirect = (provider) => (e) => {
+    if (busy) {
+      e.preventDefault();
+      return;
+    }
+    setPending(provider);
+  };
 
   return (
     <main className={styles.page}>
@@ -162,13 +222,20 @@ export default function Login() {
           Доступ только для добавленных пользователей
         </p>
 
-        {error && (
-          <p className={styles.error} role="alert">
-            {ERROR_MESSAGES[error] || ERROR_MESSAGES.failed}
-          </p>
-        )}
-
         <div className={styles.buttons}>
+          <a
+            className={`${styles.button} ${styles.google}`}
+            href={googleHref}
+            onClick={startRedirect('google')}
+            aria-disabled={busy}
+            aria-busy={pending === 'google'}
+          >
+            <GoogleIcon />
+            {pending === 'google'
+              ? 'Переходим в Google…'
+              : 'Войти через Google'}
+          </a>
+
           <button
             type="button"
             className={`${styles.button} ${styles.telegram}`}
@@ -185,13 +252,7 @@ export default function Login() {
           <a
             className={`${styles.button} ${styles.yandex}`}
             href={yandexHref}
-            onClick={(e) => {
-              if (busy) {
-                e.preventDefault();
-                return;
-              }
-              setPending('yandex');
-            }}
+            onClick={startRedirect('yandex')}
             aria-disabled={busy}
             aria-busy={pending === 'yandex'}
           >

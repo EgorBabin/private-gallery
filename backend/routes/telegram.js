@@ -2,6 +2,7 @@ import express from 'express';
 import crypto from 'crypto';
 import pool from '../db.js';
 import { logAction } from '../utils/logger.js';
+import { recordLogin } from '../utils/userLookup.js';
 
 const router = express.Router();
 
@@ -173,6 +174,7 @@ router.get('/', async (req, res) => {
                     req.session.cookie.expires = false;
                 }
 
+                recordLogin(user.id, 'telegram');
                 logAction(
                     req,
                     '✅ Пользователь авторизовался через Telegram',

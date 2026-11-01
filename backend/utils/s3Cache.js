@@ -14,7 +14,9 @@ const memoryCache = new Map();
 
 function memoryGet(key) {
     const entry = memoryCache.get(key);
-    if (!entry) return null;
+    if (!entry) {
+        return null;
+    }
     if (entry.expiresAt < Date.now()) {
         memoryCache.delete(key);
         return null;
@@ -51,10 +53,14 @@ function debug(...args) {
 export async function getPreviewCache(prefix) {
     const key = cacheKeyForPrefix(prefix);
     const client = getRedisClient();
-    if (!client) return memoryGet(key);
+    if (!client) {
+        return memoryGet(key);
+    }
     try {
         const raw = await client.get(key);
-        if (!raw) return null;
+        if (!raw) {
+            return null;
+        }
         debug(`[Redis] Cache hit for ${prefix}`);
         return JSON.parse(raw);
     } catch (err) {
@@ -95,7 +101,9 @@ export async function addPreviewKey(prefix, item) {
 export async function clearPreviewCache(prefix) {
     memoryCache.delete(cacheKeyForPrefix(prefix));
     const client = getRedisClient();
-    if (!client) return;
+    if (!client) {
+        return;
+    }
     try {
         await client.del(cacheKeyForPrefix(prefix));
         debug(`[Redis] Cache cleared for ${prefix}`);
@@ -121,7 +129,9 @@ export async function getMediaIndexEntry(prefix, base) {
     }
     try {
         const [built, raw] = await client.hmget(key, MEDIA_BUILT_FIELD, base);
-        if (!built) return { built: false, entry: null };
+        if (!built) {
+            return { built: false, entry: null };
+        }
         return { built: true, entry: raw ? JSON.parse(raw) : null };
     } catch (err) {
         debug(`[Redis] Media index read failed for ${prefix}:`, err.message);
@@ -157,7 +167,9 @@ export async function clearMediaIndex(prefix) {
     const key = mediaKeyForPrefix(prefix);
     memoryCache.delete(key);
     const client = getRedisClient();
-    if (!client) return;
+    if (!client) {
+        return;
+    }
     try {
         await client.del(key);
     } catch (err) {

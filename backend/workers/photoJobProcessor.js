@@ -8,6 +8,7 @@ import {
 import { syncCardByPath } from '../utils/galleryCardSync.js';
 import { normalizeEtag } from '../utils/folderListing.js';
 import { saveDimensions } from '../utils/mediaDimensions.js';
+import { decodeSourceImage } from '../utils/sourceDecoder.js';
 import { processGalleryReorderJob } from './galleryReorderJobProcessor.js';
 import { processGallerySoftDeleteJob } from './gallerySoftDeleteJobProcessor.js';
 
@@ -103,9 +104,14 @@ async function assertReadableImage(buffer, key) {
 // Исходник декодируется один раз: EXIF-поворот (фото с телефона иначе
 // лежат набок) и уменьшение до самого большого размера в raw-пиксели,
 // из которых затем режутся все варианты.
-async function decodeOriented(sourceBuffer, maxWidth) {
-    const { data, info } = await sharp(sourceBuffer, SHARP_INPUT_OPTIONS)
-        .rotate()
+// source: результат decodeSourceImage (HEIC и RAW уже переведены конвертером
+// и повёрнуты им, для остальных поворот берётся из EXIF)
+async function decodeOriented(source, maxWidth) {
+    let pipeline = sharp(source.input, SHARP_INPUT_OPTIONS);
+    if (!source.oriented) {
+        pipeline = pipeline.rotate();
+    }
+    const { data, info } = await pipeline
         .resize({
             width: maxWidth,
             withoutEnlargement: true,
@@ -141,9 +147,9 @@ async function encodeWebp(decoded, width) {
     return { buffer: data, width: info.width, height: info.height };
 }
 
-async function buildImageOutputs(sourceBuffer, folderPath, baseName) {
+async function buildImageOutputs(source, folderPath, baseName) {
     const maxWidth = Math.max(...SCREEN_SIZES.map((size) => size.width));
-    const decoded = await decodeOriented(sourceBuffer, maxWidth);
+    const decoded = await decodeOriented(source, maxWidth);
 
     const outputs = [];
     for (const size of SCREEN_SIZES) {
@@ -158,9 +164,9 @@ async function buildImageOutputs(sourceBuffer, folderPath, baseName) {
     return outputs;
 }
 
-async function buildVideoOutputs(sourceBuffer, folderPath, baseName) {
+async function buildVideoOutputs(source, folderPath, baseName) {
     const previewWidth = 400;
-    const decoded = await decodeOriented(sourceBuffer, previewWidth);
+    const decoded = await decodeOriented(source, previewWidth);
     const encoded = await encodeWebp(decoded, previewWidth);
 
     const previewKey = `${PREVIEW_ROOT}${folderPath}/${baseName}.webp`;
@@ -224,19 +230,13 @@ async function processUploadJob(rawPayload) {
             throw new Error(`Source file is empty: ${job.sourceKey}`);
         }
 
-        await assertReadableImage(sourceBuffer, job.sourceKey);
+        // HEIC (iPhone) и RAW камер переводятся в формат, понятный sharp
+        const source = await decodeSourceImage(sourceBuffer, job.sourceKey);
+        await assertReadableImage(source.input, job.sourceKey);
 
         const outputs = job.videoFlag
-            ? await buildVideoOutputs(
-                  sourceBuffer,
-                  job.folderPath,
-                  job.baseName,
-              )
-            : await buildImageOutputs(
-                  sourceBuffer,
-                  job.folderPath,
-                  job.baseName,
-              );
+            ? await buildVideoOutputs(source, job.folderPath, job.baseName)
+            : await buildImageOutputs(source, job.folderPath, job.baseName);
 
         uploadedKeys = await uploadOutputsAtomically(outputs);
         await savePreviewDimensions(outputs);

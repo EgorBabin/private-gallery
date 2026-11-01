@@ -9,6 +9,7 @@ import {
 import { processPhotoJob } from './workers/photoJobProcessor.js';
 import { startSoftDeleteSweeper } from './workers/softDeleteSweeper.js';
 import { startGalleryCacheRefresher } from './workers/galleryCacheRefresher.js';
+import { startAuditLogPruner } from './utils/auditLog.js';
 
 const RETRY_DELAY_DEFAULT_MS = 3000;
 const rawRetryDelayMs = Number(
@@ -24,6 +25,7 @@ const POLL_INTERVAL_MS = 30 * 1000;
 let isShuttingDown = false;
 let stopSoftDeleteSweeper = null;
 let stopGalleryCacheRefresher = null;
+let stopAuditLogPruner = null;
 let stopListening = null;
 let pollTimer = null;
 let currentJobId = null;
@@ -133,6 +135,7 @@ async function gracefulShutdown(signal) {
     for (const stop of [
         stopSoftDeleteSweeper,
         stopGalleryCacheRefresher,
+        stopAuditLogPruner,
         stopListening,
     ]) {
         if (!stop) {
@@ -169,6 +172,8 @@ process.on('SIGTERM', () => {
 async function main() {
     stopSoftDeleteSweeper = startSoftDeleteSweeper();
     stopGalleryCacheRefresher = startGalleryCacheRefresher();
+    // журнал хранится AUDIT_LOG_RETENTION_DAYS дней
+    stopAuditLogPruner = startAuditLogPruner();
     pollTimer = setInterval(() => void drainQueue(), POLL_INTERVAL_MS);
     await subscribe();
 }

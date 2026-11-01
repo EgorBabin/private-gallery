@@ -49,3 +49,26 @@ CREATE TABLE IF NOT EXISTS public.jobs (
   locked_at timestamptz,
   created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+-- статистика и журнал админки (backend добавляет их и сам, см. utils/schema.js)
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS last_login_at timestamptz;
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS last_login_method text;
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS last_seen_at timestamptz;
+
+CREATE TABLE IF NOT EXISTS public.audit_log (
+  id bigserial PRIMARY KEY,
+  created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  category text NOT NULL,
+  outcome text,
+  action text NOT NULL,
+  details text,
+  meta jsonb,
+  user_id integer,
+  email text,
+  ip text,
+  device text,
+  method text,
+  path text
+);
+CREATE INDEX IF NOT EXISTS idx_audit_log_created ON public.audit_log (created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_log_user ON public.audit_log (user_id, created_at DESC);

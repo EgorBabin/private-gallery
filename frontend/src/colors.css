@@ -93,8 +93,6 @@
   --color-button-shadow-telegram: rgba(63, 121, 131, 0.24);
   --color-button-shadow-yandex: rgba(138, 71, 63, 0.24);
   --color-button-border-dark: rgba(0, 0, 0, 0.18);
-  --color-login-error-bg: rgba(138, 71, 63, 0.22);
-  --color-login-error-border: rgba(214, 120, 108, 0.4);
 
   /* Users/Admin */
   --color-users-border: rgba(231, 237, 246, 0.2);

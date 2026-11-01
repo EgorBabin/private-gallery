@@ -4,6 +4,24 @@ import { logAction } from '../utils/logger.js';
 
 // Обычная сессия (без «Запомнить меня») живёт 30 минут с последнего запроса.
 const SESSION_IDLE_MS = 1000 * 60 * 30;
+// «Последняя активность» пишется в базу не чаще раза в 5 минут на пользователя
+const LAST_SEEN_THROTTLE_MS = 1000 * 60 * 5;
+const lastSeenWrites = new Map();
+
+function touchLastSeen(userId) {
+    const id = Number(userId);
+    const now = Date.now();
+    if (now - (lastSeenWrites.get(id) || 0) < LAST_SEEN_THROTTLE_MS) {
+        return;
+    }
+    lastSeenWrites.set(id, now);
+    pool.query(
+        'UPDATE users SET last_seen_at = CURRENT_TIMESTAMP WHERE id = $1',
+        [id],
+    ).catch((err) => {
+        console.error('Failed to update last_seen_at:', err.message);
+    });
+}
 
 // import checkSession from '../utils/checkSession.js';
 
@@ -177,6 +195,7 @@ export default function checkSession(opts = {}) {
                     if (dbRole !== String(user.role).trim().toLowerCase()) {
                         req.session.user.role = dbRole;
                     }
+                    touchLastSeen(user.id);
                 }
             }
 
@@ -184,7 +203,9 @@ export default function checkSession(opts = {}) {
                 try {
                     logAction(
                         req,
-                        `Сессия некорректна, удаляем. missing: ${missing.join(',')}`,
+                        `⚠️ Сессия некорректна, удаляем. missing: ${missing.join(',')}`,
+                        '',
+                        { category: 'security' },
                     );
                 } catch (err) {
                     console.debug('logAction failed (invalid session):', err);

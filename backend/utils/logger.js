@@ -1,8 +1,17 @@
 import useragent from 'express-useragent';
+import {
+    categoryOf,
+    cleanDetails,
+    outcomeOf,
+    writeAuditLog,
+} from './auditLog.js';
 
 // роутер
 // logAction(req, 'Создание чего-то важного', { someId: 123 })
-// logAction(req, 'Шумное событие', '', { notify: false }) // только stdout
+// logAction(req, 'Шумное событие', '', { notify: false }) // без Telegram
+// Всё, что делает вошедший пользователь, и всё с notify сохраняется в журнал
+// (таблица audit_log, страница «Журнал»); category/meta — для фильтров и
+// статистики, по умолчанию категория определяется по пути запроса.
 // логика
 // res.json({ ok: true })
 //
@@ -39,6 +48,18 @@ function getDeviceType(req) {
     return ua.isMobile ? 'Mobile' : 'PC';
 }
 
+function describeDevice(req) {
+    const ua = useragent.parse(req.headers['user-agent'] || '');
+    const parts = [ua.isMobile ? 'Телефон' : 'Компьютер'];
+    if (ua.browser && ua.browser !== 'unknown') {
+        parts.push(ua.browser);
+    }
+    if (ua.os && ua.os !== 'unknown') {
+        parts.push(ua.os);
+    }
+    return parts.join(' · ');
+}
+
 function sleep(ms) {
     return new Promise((resolve) => {
         setTimeout(resolve, ms);
@@ -66,7 +87,11 @@ async function postToTelegram(message) {
 
     const body = await res.json().catch(() => null);
     const retryAfterSec = Number(body?.parameters?.retry_after) || 0;
-    console.error('Telegram отклонил сообщение:', res.status, body?.description);
+    console.error(
+        'Telegram отклонил сообщение:',
+        res.status,
+        body?.description,
+    );
     return retryAfterSec * 1000;
 }
 
@@ -149,14 +174,21 @@ function shouldSendUrlToTelegram(pathname) {
     return !AUTH_ROUTE_RE.test(String(pathname || ''));
 }
 
-export function logAction(req, action, extra = {}, { notify = true } = {}) {
+export function logAction(
+    req,
+    action,
+    extra = {},
+    { notify = true, category, meta } = {},
+) {
     const timestamp = new Date().toLocaleString('ru-RU', {
         timeZone: 'Europe/Moscow',
     });
+    // req.ip учитывает trust proxy: это адрес, который подставил Caddy, а не
+    // любое значение X-Forwarded-For, присланное клиентом
     const ip =
+        req.ip ||
         req.headers['x-forwarded-for']?.split(',')[0]?.trim() ||
         req.socket?.remoteAddress ||
-        req.ip ||
         'unknown';
     const cleanPath = String(req.originalUrl || '').split('?', 1)[0] || '/';
     const sanitizedUrl = sanitizeOriginalUrl(req.originalUrl);
@@ -174,6 +206,23 @@ export function logAction(req, action, extra = {}, { notify = true } = {}) {
     const logEntry = `[activity] [${timestamp}] IP: ${ip} | ${method} ${sanitizedUrl} | ${device} | Email: ${email} | Auth: ${authType} | Action: ${action}${extraData}`;
 
     console.log(logEntry);
+
+    // боты без сессии в журнал не попадают, попытки входа (notify) — попадают
+    if (notify || user.id) {
+        writeAuditLog({
+            category: category || categoryOf(cleanPath, action),
+            outcome: outcomeOf(action),
+            action,
+            details: cleanDetails(extra),
+            meta,
+            userId: user.id,
+            email: user.email || null,
+            ip,
+            device: describeDevice(req),
+            method,
+            path: sanitizedUrl,
+        });
+    }
 
     if (!notify) {
         return;

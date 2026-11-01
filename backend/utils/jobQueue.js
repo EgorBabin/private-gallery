@@ -86,7 +86,9 @@ export async function listenForJobs(onJob, onError) {
     let released = false;
 
     const release = (err) => {
-        if (released) return;
+        if (released) {
+            return;
+        }
         released = true;
         client.removeAllListeners('notification');
         client.removeAllListeners('error');
@@ -107,7 +109,9 @@ export async function listenForJobs(onJob, onError) {
     }
 
     return async () => {
-        if (released) return;
+        if (released) {
+            return;
+        }
         try {
             await client.query(`UNLISTEN ${JOBS_CHANNEL}`);
         } catch {

@@ -26,15 +26,19 @@ Folder cards on the home page, a masonry view inside each folder, a Swiper light
 
 ### Privacy By Default
 
-PostgreSQL-backed sessions, HTTP-only secure cookies, CSRF protection, `user` / `admin` roles, private API checks, Telegram and Yandex login for pre-approved users.
+PostgreSQL-backed sessions, HTTP-only secure cookies, CSRF protection, `user` / `admin` roles, private API checks, Google, Telegram and Yandex login for pre-approved users.
 
 ### Admin Workflows That Cover Real Use
 
 Create and edit folders, change covers, manage users, upload new images, mark a preview as video, reorder media with drag-and-drop and remove content without touching files manually.
 
+User edits are saved with a single "Save" button, and leaving the page with unsaved changes asks for confirmation. The "Statistics" section shows who has access, when and from where they last signed in, recent activity, uploads and open sessions (which can be revoked). The "Log" section keeps every action of signed-in users and every sign-in attempt (IP, device, time) with search and filters; requests from bots without a session are not stored.
+
 ### Smart Media Handling
 
 Originals stay separate, while lightweight WebP display versions are generated for `preview`, `screen-1280`, `screen-1920` and `screen-2560`. The gallery uses local cache to show previously opened folders faster.
+
+Supported upload formats: JPEG, PNG, WEBP, AVIF, GIF, TIFF, iPhone HEIC/HEIF and camera RAW (Sony ARW, Canon CR2/CR3, Nikon NEF, DNG, Fujifilm RAF, Olympus ORF, Panasonic RW2 and more). HEIC is converted with `heif-dec` (libheif), RAW with `dcraw_emu` (LibRaw) at half resolution, which is enough for every display size. The original is stored as is and the HD button serves it.
 
 ### Safe Deletion
 
@@ -206,6 +210,7 @@ Fill in the main values:
 - `S3_BUCKET`, `S3_REGION`, `S3_ENDPOINT`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` - S3-compatible storage.
 - `PG_USER`, `PG_PASSWORD`, `PG_HOST`, `PG_PORT`, `PG_DATABASE` - PostgreSQL.
 - `APP_INIT_*` - first user.
+- `GOOGLE_*` - Google login. In Google Cloud Console create an OAuth client of type "Web application", set the redirect URI to `https://<domain>/api/google/callback` and keep only the `openid` and `email` scopes. The address is matched against the same user `email` array as Yandex.
 - `YANDEX_*` - Yandex OAuth.
 - `TG_BOT_TOKEN`, `TG_CHAT_ID` - Telegram login and notifications. Set the site domain for the bot in BotFather with `/setdomain`.
 
@@ -255,6 +260,12 @@ The last two commands remove old images and build cache. Without them every rebu
 
 - Caddy sends a Content-Security-Policy, `Referrer-Policy: strict-origin-when-cross-origin` (S3 and other sites only see the domain, not folder names) and `X-Robots-Tag: noindex`. Set `S3_PUBLIC_ORIGIN` in `.env` so images and video are allowed only from your storage.
 - Sessions are not bound to the IP (`SESSION_BIND_IP=false`), otherwise phones get logged out when switching networks. CSRF protection: an HMAC session token plus an `Origin` check. The API is rate limited per IP.
+- GPS coordinates can be removed from originals without damaging the files: the GPS block is wiped in place, while the image, orientation, date, camera and other metadata stay intact. JPEG, PNG, TIFF, HEIC/HEIF and RAW (including CR3) are supported. For new uploads set `STRIP_GPS_ON_UPLOAD=true`; for existing files use the script (check first, then clean):
+
+```bash
+docker compose run --rm photo-worker node scripts/stripLocation.js
+docker compose run --rm photo-worker node scripts/stripLocation.js --apply
+```
 
 ## Who It Fits
 

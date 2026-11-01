@@ -9,6 +9,8 @@ import GalleryView from '@/pages/Gallery/GalleryView';
 // админка, вход и 404 нужны редко: отдельные чанки, не в основном бандле
 const GalleryEdit = lazy(() => import('@/pages/Gallery/GalleryEdit'));
 const Users = lazy(() => import('@/pages/Admin/Users'));
+const AdminStats = lazy(() => import('@/pages/Admin/Stats'));
+const AdminLogs = lazy(() => import('@/pages/Admin/Logs'));
 const Login = lazy(() => import('@/pages/Login/Login'));
 const NotFound = lazy(() => import('@/pages/404/404'));
 // components
@@ -42,6 +44,8 @@ function AppInner() {
           <Route path="/edit/admin" element={<Users />} />
           <Route path="/:year/:category" element={<GalleryView />} />
           <Route path="/admin" element={<Users />} />
+          <Route path="/admin/stats" element={<AdminStats />} />
+          <Route path="/admin/logs" element={<AdminLogs />} />
           <Route path="/login" element={<Login />} />
           <Route path="/auth" element={<Login />} />
           <Route path="*" element={<NotFound />} />

@@ -26,15 +26,19 @@ Private Gallery родилась как проект для себя: быстр
 
 ### Приватность По Умолчанию
 
-Сессии в PostgreSQL, HTTP-only secure cookies, CSRF-защита, роли `user` / `admin`, проверка приватных API routes, Telegram и Yandex login для заранее добавленных пользователей.
+Сессии в PostgreSQL, HTTP-only secure cookies, CSRF-защита, роли `user` / `admin`, проверка приватных API routes, вход через Google, Telegram и Яндекс для заранее добавленных пользователей.
 
 ### Админка, Которая Закрывает Реальные Сценарии
 
 Можно создавать и редактировать папки, менять обложки, управлять пользователями, загружать новые изображения, отмечать preview для видео, менять порядок медиа drag-and-drop и удалять контент без ручной работы с файлами.
 
+Правки пользователей сохраняются одной кнопкой «Сохранить», а при уходе со страницы с несохранёнными изменениями появляется предупреждение. Раздел «Статистика» показывает, кто имеет доступ, когда и откуда последний раз входил, был ли недавно в галерее, сколько загрузил фото и сколько у него открытых сессий (их можно завершить). Раздел «Журнал» хранит все действия вошедших пользователей и все попытки входа (IP, устройство, время) с поиском и фильтрами; запросы ботов без входа не записываются.
+
 ### Умная Работа С Медиа
 
 Оригиналы остаются отдельно, а для просмотра создаются легкие WebP-версии: `preview`, `screen-1280`, `screen-1920`, `screen-2560`. Галерея использует local cache, чтобы быстрее показывать уже открытые папки.
+
+Поддерживаемые форматы загрузки: JPEG, PNG, WEBP, AVIF, GIF, TIFF, HEIC/HEIF с iPhone и RAW камер (Sony ARW, Canon CR2/CR3, Nikon NEF, DNG, Fujifilm RAF, Olympus ORF, Panasonic RW2 и другие). HEIC переводится утилитой `heif-dec` (libheif), RAW — `dcraw_emu` (LibRaw) с половинным разрешением, которого хватает для всех вариантов просмотра. Оригинал хранится как есть, кнопка HD отдаёт именно его.
 
 ### Безопасное Удаление
 
@@ -206,6 +210,7 @@ nano .env
 - `S3_BUCKET`, `S3_REGION`, `S3_ENDPOINT`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` - S3-compatible storage.
 - `PG_USER`, `PG_PASSWORD`, `PG_HOST`, `PG_PORT`, `PG_DATABASE` - PostgreSQL.
 - `APP_INIT_*` - первый пользователь.
+- `GOOGLE_*` - вход через Google. В Google Cloud Console создайте OAuth-клиент типа «Web application», укажите redirect URI `https://<домен>/api/google/callback`, в доступах оставьте только `openid` и `email`. Почта ищется в том же массиве `email` пользователя, что и для Яндекса.
 - `YANDEX_*` - Yandex OAuth.
 - `TG_BOT_TOKEN`, `TG_CHAT_ID` - вход через Telegram и уведомления. Домен сайта нужно указать боту в BotFather командой `/setdomain`.
 
@@ -255,6 +260,12 @@ docker builder prune -f
 
 - Caddy отдаёт Content-Security-Policy, `Referrer-Policy: strict-origin-when-cross-origin` (в S3 и на чужие сайты уходит только домен, без названий папок) и `X-Robots-Tag: noindex`. Укажите `S3_PUBLIC_ORIGIN` в `.env`, чтобы картинки и видео разрешались только с вашего хранилища.
 - Сессия не привязана к IP (`SESSION_BIND_IP=false`), иначе телефон выкидывает при смене сети. CSRF-защита: HMAC-токен сессии и проверка `Origin`. API ограничен по частоте запросов с одного IP.
+- Координаты съёмки (GPS) можно удалить из оригиналов, не повреждая файлы: блок GPS затирается на месте, изображение, поворот, дата, камера и остальные метаданные остаются. Поддерживаются JPEG, PNG, TIFF, HEIC/HEIF и RAW (в том числе CR3). Для новых загрузок — `STRIP_GPS_ON_UPLOAD=true`, для уже загруженных — скрипт (сначала проверка, потом очистка):
+
+```bash
+docker compose run --rm photo-worker node scripts/stripLocation.js
+docker compose run --rm photo-worker node scripts/stripLocation.js --apply
+```
 
 ## Для Кого
 

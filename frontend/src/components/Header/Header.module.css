@@ -27,7 +27,9 @@
 }
 
 .nav {
-  width: clamp(120px, 70%, 300px);
+  /* у админа 4 иконки (с выходом): не переносим их на вторую строку */
+  width: clamp(120px, 90%, 340px);
+  white-space: nowrap;
   border-radius: 0.7rem;
 
   /* без backdrop-filter: размытие поверх прокручиваемых фото сильно

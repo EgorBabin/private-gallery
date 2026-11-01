@@ -7,6 +7,7 @@ import path from 'path';
 import {
     uploadToS3,
     listObjects,
+    listAllObjects,
     getSignedUrlForKey,
     getObjectBufferFromS3,
     headObjectMeta,
@@ -32,12 +33,20 @@ import {
     parseNumericIndexFromBase,
 } from '../utils/deletionMarker.js';
 import { publishPhotoJob } from '../utils/jobQueue.js';
+import {
+    MEDIA_FILE_RE,
+    ORIGINAL_IMAGE_EXTENSIONS,
+    ORIGINAL_IMAGE_RE,
+    decodeSourceImage,
+} from '../utils/sourceDecoder.js';
+import { stripLocation } from '../utils/stripLocation.js';
 import { logAction } from '../utils/logger.js';
 import { sendError, sendSuccess } from '../utils/apiResponse.js';
 
 const router = express.Router();
 
-const DEFAULT_MAX_UPLOAD_MB = 20;
+// RAW с современных камер весят 25-80 МБ
+const DEFAULT_MAX_UPLOAD_MB = 100;
 const rawMaxUploadMb = Number(
     process.env.MAX_UPLOAD_MB || DEFAULT_MAX_UPLOAD_MB,
 );
@@ -45,42 +54,46 @@ const MAX_UPLOAD_BYTES =
     Number.isFinite(rawMaxUploadMb) && rawMaxUploadMb > 0
         ? Math.floor(rawMaxUploadMb * 1024 * 1024)
         : DEFAULT_MAX_UPLOAD_MB * 1024 * 1024;
-// расширение оригинала по типу файла: имя от клиента не должно задавать
-// произвольное расширение (например .html) ключа в S3
+// Расширение оригинала: только из списка поддерживаемых форматов
+// (sourceDecoder.js), имя от клиента не должно задавать произвольное
+// расширение (например .html) ключа в S3. Для RAW браузеры часто не знают
+// MIME-тип и присылают пустой или application/octet-stream, поэтому
+// формат определяется по расширению, а при его отсутствии — по MIME.
 const EXTENSION_BY_MIME = {
-    'image/jpeg': ['.jpg', '.jpeg'],
-    'image/png': ['.png'],
-    'image/webp': ['.webp'],
-    'image/avif': ['.avif'],
-    'image/gif': ['.gif'],
-    'image/tiff': ['.tif', '.tiff'],
+    'image/jpeg': '.jpg',
+    'image/png': '.png',
+    'image/webp': '.webp',
+    'image/avif': '.avif',
+    'image/gif': '.gif',
+    'image/tiff': '.tif',
+    'image/heic': '.heic',
+    'image/heif': '.heif',
+    'image/heic-sequence': '.heic',
+    'image/heif-sequence': '.heif',
+    'image/x-adobe-dng': '.dng',
 };
 
 function pickOriginalExtension(file) {
-    const allowed = EXTENSION_BY_MIME[String(file?.mimetype).toLowerCase()];
     const clientExt = path
         .extname(String(file?.originalname || ''))
         .toLowerCase();
-    if (!allowed) {
-        return '.jpg';
+    if (ORIGINAL_IMAGE_EXTENSIONS.includes(clientExt)) {
+        return clientExt;
     }
-    return allowed.includes(clientExt) ? clientExt : allowed[0];
+    return (
+        EXTENSION_BY_MIME[String(file?.mimetype || '').toLowerCase()] || null
+    );
 }
+
+// STRIP_GPS_ON_UPLOAD=true: у новых оригиналов сразу затираются координаты
+// (без изменения изображения, см. utils/stripLocation.js)
+const STRIP_GPS_ON_UPLOAD = process.env.STRIP_GPS_ON_UPLOAD === 'true';
 
 const rawMaxUploadFiles = Number(process.env.MAX_UPLOAD_IMAGES || 0);
 const MAX_UPLOAD_FILES =
     Number.isInteger(rawMaxUploadFiles) && rawMaxUploadFiles > 0
         ? rawMaxUploadFiles
         : undefined;
-
-const ALLOWED_UPLOAD_MIME_TYPES = new Set([
-    'image/jpeg',
-    'image/png',
-    'image/webp',
-    'image/avif',
-    'image/gif',
-    'image/tiff',
-]);
 
 // Файлы пишутся во временную папку и читаются по одному, а не держатся
 // в памяти все сразу (до MAX_UPLOAD_IMAGES x MAX_UPLOAD_MB на запрос).
@@ -93,8 +106,7 @@ const upload = multer({
     },
     fileFilter: (req, file, cb) => {
         void req;
-        const mimeType = String(file?.mimetype || '').toLowerCase();
-        if (!ALLOWED_UPLOAD_MIME_TYPES.has(mimeType)) {
+        if (!pickOriginalExtension(file)) {
             return cb(new Error('Unsupported file type'));
         }
         return cb(null, true);
@@ -113,7 +125,6 @@ const REORDER_STATUS_ROOT = 'processing/reorder/';
 const CARDS_S3_CONCURRENCY = 4;
 const REORDER_S3_CONCURRENCY = 8;
 const PENDING_DELETE_S3_CONCURRENCY = 6;
-const MEDIA_FILE_RE = /\.(jpe?g|png|webp|avif|gif|mp4|tiff?)$/i;
 const SOFT_DELETE_JOB_TYPE = 'gallery-soft-delete';
 const SOFT_DELETE_ACTION_DELETE = 'delete';
 const SOFT_DELETE_ACTION_RESTORE = 'restore';
@@ -764,7 +775,10 @@ router.post('/upload', upload.array('image'), async (req, res) => {
         for (const file of files) {
             let statusKey = null;
             try {
-                const buffer = await fs.readFile(file.path);
+                const uploaded = await fs.readFile(file.path);
+                const buffer = STRIP_GPS_ON_UPLOAD
+                    ? stripLocation(uploaded).buffer
+                    : uploaded;
                 let baseName = makeNumericName(req);
                 if (videoFlag) {
                     baseName = `video_${baseName}`;
@@ -878,9 +892,9 @@ router.post('/upload', upload.array('image'), async (req, res) => {
         const uploadedCount = results.filter((r) => r.success).length;
         logAction(
             req,
-            'Uploaded files',
-            `${uploadedCount}/${files.length} → ${folderPath}
-            #galleryEdit.js #upload`,
+            'Загрузка файлов',
+            `${uploadedCount}/${files.length} → ${folderPath}`,
+            { meta: { uploaded: uploadedCount, folder: folderPath } },
         );
 
         sendSuccess(res, {
@@ -1635,10 +1649,9 @@ router.get('/reconcile', async (req, res) => {
         setImmediate(async () => {
             try {
                 const origPrefix = `${ORIGINAL_ROOT}${prefix}/`;
-                const origList = await listObjects(origPrefix);
-                const origFiles = (origList.Contents || []).filter(
-                    (file) =>
-                        file.Key && /\.(jpe?g|png|tiff?)$/i.test(file.Key),
+                // все страницы листинга: в папке может быть больше 1000 файлов
+                const origFiles = (await listAllObjects(origPrefix)).filter(
+                    (file) => file.Key && ORIGINAL_IMAGE_RE.test(file.Key),
                 );
 
                 if (origFiles.length === 0) {
@@ -1663,10 +1676,10 @@ router.get('/reconcile', async (req, res) => {
                 const existingKeys = new Set();
 
                 try {
-                    const previewList = await listObjects(
+                    const previewList = await listAllObjects(
                         `${PREVIEW_ROOT}${prefix}/`,
                     );
-                    (previewList.Contents || []).forEach(
+                    previewList.forEach(
                         (obj) => obj.Key && existingKeys.add(obj.Key),
                     );
                 } catch (err) {
@@ -1675,8 +1688,8 @@ router.get('/reconcile', async (req, res) => {
 
                 for (const dir of SCREEN_DIRS) {
                     try {
-                        const list = await listObjects(`${dir}/${prefix}/`);
-                        (list.Contents || []).forEach(
+                        const list = await listAllObjects(`${dir}/${prefix}/`);
+                        list.forEach(
                             (obj) => obj.Key && existingKeys.add(obj.Key),
                         );
                     } catch (err) {
@@ -1811,8 +1824,16 @@ router.get('/reconcile', async (req, res) => {
 
                     let baseBuffer;
                     try {
-                        baseBuffer = await sharp(origBuffer)
-                            .rotate()
+                        // HEIC и RAW сначала переводятся конвертером
+                        const source = await decodeSourceImage(
+                            origBuffer,
+                            origKey,
+                        );
+                        let pipeline = sharp(source.input);
+                        if (!source.oriented) {
+                            pipeline = pipeline.rotate();
+                        }
+                        baseBuffer = await pipeline
                             .resize({
                                 width: maxWidth,
                                 withoutEnlargement: true,
@@ -1972,7 +1993,7 @@ router.use((err, req, res, next) => {
         httpStatus: 400,
         status: 'warning',
         message:
-            'Неподдерживаемый тип файла. Разрешены JPEG/PNG/WEBP/AVIF/GIF/TIFF',
+            'Неподдерживаемый тип файла. Разрешены JPEG, PNG, WEBP, AVIF, GIF, TIFF, HEIC/HEIF и RAW камер',
     });
 });
 

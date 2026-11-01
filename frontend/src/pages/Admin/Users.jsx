@@ -1,32 +1,95 @@
-import { useCallback, useEffect, useState } from 'react';
-import styles from './Users.module.css';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import styles from './Admin.module.css';
+import AdminNav from './AdminNav';
 import { useTitle } from '@/hooks/useTitle';
 import { useCsrfFetch } from '@/hooks/useCsrfFetch';
-import { useWarnOnUnload } from '@/hooks/useWarnOnUnload';
+import { useCheckSession } from '@/hooks/useCheckSession';
+import { useUnsavedGuard } from '@/hooks/useUnsavedGuard';
 import { useVibration } from '@/hooks/useVibration';
 import { parseApiResponse } from '@/utils/apiResponse';
 import { notify, notifyError } from '@/utils/notifications';
+
+// Правки копятся в черновике и уходят на сервер только по кнопке
+// «Сохранить», поэтому сервер не проверяет недописанные значения.
+
+const EMPTY_FORM = {
+  username: '',
+  emailText: '',
+  telegramID: '',
+  role: 'user',
+};
+
+function splitEmails(text) {
+  return String(text || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function toDraft(user) {
+  return {
+    username: user.username || '',
+    emailText: (user.email || []).join(', '),
+    telegramID: user.telegramID || '',
+    role: user.role || 'user',
+    isActive: user.is_active !== false,
+  };
+}
+
+/** Поля, отличающиеся от сохранённых, в формате тела PUT /api/users/:id. */
+function buildPatch(user, draft) {
+  const original = toDraft(user);
+  const patch = {};
+  if (draft.username.trim() !== original.username) {
+    patch.username = draft.username.trim();
+  }
+  const emails = splitEmails(draft.emailText);
+  if (emails.join(',') !== splitEmails(original.emailText).join(',')) {
+    patch.email = emails;
+  }
+  if (draft.telegramID.trim() !== original.telegramID) {
+    patch.telegramID = draft.telegramID.trim() || null;
+  }
+  if (draft.role !== original.role) {
+    patch.role = draft.role;
+  }
+  if (draft.isActive !== original.isActive) {
+    patch.is_active = draft.isActive;
+  }
+  return patch;
+}
 
 export default function UsersPage() {
   useTitle('Пользователи');
   const csrfFetch = useCsrfFetch();
   const vibrate = useVibration();
+  const { user: currentUser } = useCheckSession();
 
   const [users, setUsers] = useState([]);
-  const [form, setForm] = useState({
-    username: '',
-    email: '',
-    telegramID: '',
-    role: 'user',
-  });
+  const [drafts, setDrafts] = useState({});
+  const [rowErrors, setRowErrors] = useState({});
   const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState(EMPTY_FORM);
+  const [adding, setAdding] = useState(false);
 
-  // флаг несохранённые изменения для хука
-  const [isDirty, setIsDirty] = useState(false);
-  // подключаем предупреждение при закрытии вкладки
-  useWarnOnUnload(isDirty);
+  const patches = useMemo(() => {
+    const result = {};
+    for (const user of users) {
+      const draft = drafts[user.id];
+      if (!draft) continue;
+      const patch = buildPatch(user, draft);
+      if (Object.keys(patch).length > 0) result[user.id] = patch;
+    }
+    return result;
+  }, [users, drafts]);
+  const dirtyCount = Object.keys(patches).length;
+  const formDirty = Object.entries(form).some(
+    ([key, value]) => value !== EMPTY_FORM[key],
+  );
 
-  // Получение списка пользователей
+  useUnsavedGuard(dirtyCount > 0 || formDirty);
+
   const fetchUsers = useCallback(async () => {
     setLoading(true);
     try {
@@ -35,13 +98,7 @@ export default function UsersPage() {
         res,
         'Не удалось загрузить пользователей',
       );
-
-      const usersList = Array.isArray(data?.users)
-        ? data.users
-        : Array.isArray(data)
-          ? data
-          : [];
-      setUsers(usersList);
+      setUsers(Array.isArray(data?.users) ? data.users : []);
     } catch (e) {
       vibrate('false');
       notifyError(e, 'Не удалось загрузить пользователей');
@@ -54,56 +111,89 @@ export default function UsersPage() {
     fetchUsers();
   }, [fetchUsers]);
 
-  // Обработка формы
-  function handleChange(e) {
-    setForm((prev) => ({ ...prev, [e.target.name]: e.target.value }));
-    setIsDirty(true);
-  }
+  const updateDraft = (user, field, value) => {
+    setDrafts((prev) => ({
+      ...prev,
+      [user.id]: { ...(prev[user.id] || toDraft(user)), [field]: value },
+    }));
+  };
 
-  async function handleAdd(e) {
-    e.preventDefault();
-    try {
-      const res = await csrfFetch('/api/users', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form),
-      });
+  const handleSave = async () => {
+    const entries = Object.entries(patches);
+    if (entries.length === 0 || saving) return;
+    setSaving(true);
 
-      const { data, message, status } = await parseApiResponse(
-        res,
-        'Не удалось создать пользователя',
-      );
-      const createdUser = data?.user || data;
-
-      setUsers((prev) => [...prev, createdUser]);
-      setForm({ username: '', email: '', telegramID: '', role: 'user' });
-      notify({
-        status,
-        message:
-          message ||
-          `Пользователь ${createdUser?.username || form.username} создан`,
-      });
-
-      setIsDirty(false); // сбрасываем грязь, после сохранения
-    } catch (e) {
-      vibrate('warn');
-      notifyError(e, 'Не удалось создать пользователя');
+    const errors = {};
+    let saved = 0;
+    for (const [id, patch] of entries) {
+      try {
+        const res = await csrfFetch(`/api/users/${id}`, {
+          method: 'PUT',
+          body: JSON.stringify(patch),
+        });
+        const { data } = await parseApiResponse(
+          res,
+          'Не удалось обновить пользователя',
+        );
+        const updated = data?.user;
+        setUsers((prev) =>
+          prev.map((u) => (String(u.id) === id && updated ? updated : u)),
+        );
+        setDrafts((prev) => {
+          const next = { ...prev };
+          delete next[id];
+          return next;
+        });
+        saved += 1;
+      } catch (e) {
+        errors[id] = e?.message || 'Не удалось сохранить';
+      }
     }
-  }
 
-  // Удаление пользователя
-  async function handleDelete(id) {
-    if (!window.confirm('Удалить пользователя?')) return;
+    setRowErrors(errors);
+    setSaving(false);
+    const failed = Object.keys(errors).length;
+    if (failed === 0) {
+      vibrate('click');
+      notify({
+        status: 'success',
+        title: 'Сохранено',
+        message:
+          saved === 1
+            ? 'Изменения пользователя сохранены'
+            : `Сохранено пользователей: ${saved}`,
+      });
+    } else {
+      vibrate('warn');
+      notify({
+        status: 'warning',
+        title: 'Сохранено не всё',
+        message: `Сохранено: ${saved}, с ошибками: ${failed}. Причина указана у пользователя.`,
+      });
+    }
+  };
+
+  const handleDiscard = () => {
+    setDrafts({});
+    setRowErrors({});
+  };
+
+  async function handleDelete(user) {
+    if (!window.confirm(`Удалить пользователя ${user.username}?`)) return;
     try {
-      const res = await csrfFetch(`/api/users/${id}`, {
+      const res = await csrfFetch(`/api/users/${user.id}`, {
         method: 'DELETE',
       });
-
       const { message, status } = await parseApiResponse(
         res,
         'Не удалось удалить пользователя',
       );
-      setUsers((prev) => prev.filter((u) => u.id !== id));
+      setUsers((prev) => prev.filter((u) => u.id !== user.id));
+      setDrafts((prev) => {
+        const next = { ...prev };
+        delete next[user.id];
+        return next;
+      });
       notify({ status, message: message || 'Пользователь удалён' });
     } catch (e) {
       vibrate('false');
@@ -111,155 +201,249 @@ export default function UsersPage() {
     }
   }
 
-  // Обновление пользователя (например, изменить роль)
-  async function handleUpdate(id, updatedFields) {
+  async function handleAdd(e) {
+    e.preventDefault();
+    if (adding) return;
+    setAdding(true);
     try {
-      const res = await csrfFetch(`/api/users/${id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updatedFields),
+      const res = await csrfFetch('/api/users', {
+        method: 'POST',
+        body: JSON.stringify({
+          username: form.username.trim(),
+          email: splitEmails(form.emailText),
+          telegramID: form.telegramID.trim(),
+          role: form.role,
+        }),
       });
-
-      const { data } = await parseApiResponse(
+      const { data, message, status } = await parseApiResponse(
         res,
-        'Не удалось обновить пользователя',
+        'Не удалось создать пользователя',
       );
-      const updatedUser = data?.user || data;
-      setUsers((prev) => prev.map((u) => (u.id === id ? updatedUser : u)));
-    } catch (e) {
-      vibrate('false');
-      notifyError(e, 'Не удалось обновить пользователя');
+      if (data?.user) setUsers((prev) => [...prev, data.user]);
+      setForm(EMPTY_FORM);
+      notify({
+        status,
+        message: message || `Пользователь ${form.username} создан`,
+      });
+    } catch (err) {
+      vibrate('warn');
+      notifyError(err, 'Не удалось создать пользователя');
+    } finally {
+      setAdding(false);
     }
   }
 
+  const fieldClass = (patch, key) =>
+    patch && key in patch
+      ? `${styles.field} ${styles.fieldChanged}`
+      : styles.field;
+
   return (
-    <div>
-      <h1>Пользователи</h1>
+    <div className={styles.page}>
+      <AdminNav />
+      <h1 className={styles.title}>Пользователи</h1>
+
+      <div
+        className={`${styles.saveBar} ${dirtyCount > 0 ? styles.saveBarDirty : ''}`}
+      >
+        <span className={styles.saveBarText}>
+          {saving
+            ? 'Сохраняем…'
+            : dirtyCount > 0
+              ? `Несохранённые изменения: ${dirtyCount}`
+              : 'Все изменения сохранены'}
+        </span>
+        <div className={styles.actions}>
+          <button
+            type="button"
+            className={styles.button}
+            onClick={handleDiscard}
+            disabled={dirtyCount === 0 || saving}
+          >
+            Отменить
+          </button>
+          <button
+            type="button"
+            className={`${styles.button} ${styles.buttonPrimary}`}
+            onClick={handleSave}
+            disabled={dirtyCount === 0 || saving}
+          >
+            Сохранить
+          </button>
+        </div>
+      </div>
 
       {loading ? (
-        <p>Загрузка...</p>
+        <p className={styles.empty}>Загрузка…</p>
       ) : (
-        <div className={styles.tableWrap}>
-          <table
-            border="1"
-            cellPadding="5"
-            style={{ borderCollapse: 'collapse' }}
-          >
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>Имя</th>
-                <th>Email</th>
-                <th>tgID</th>
-                <th>Роль</th>
-                <th>Действия</th>
-              </tr>
-            </thead>
-            <tbody>
-              {users.map(({ id, username, email, telegramID, role }) => (
-                <tr key={id}>
-                  <td>{id}</td>
-                  <td>
-                    <input
-                      type="text"
-                      value={username}
-                      onChange={(e) =>
-                        handleUpdate(id, {
-                          username: e.target.value,
-                        })
-                      }
-                      placeholder="Username"
-                    />
-                  </td>
-                  <td>
-                    <input
-                      type="text"
-                      value={email.join(', ')}
-                      onChange={(e) =>
-                        handleUpdate(id, {
-                          email: e.target.value.split(',').map((s) => s.trim()),
-                        })
-                      }
-                      placeholder="Email"
-                    />
-                  </td>
-                  <td>
-                    <input
-                      type="tel"
-                      inputMode="numeric"
-                      pattern="[0-9]*"
-                      value={telegramID || ''}
-                      onChange={(e) =>
-                        handleUpdate(id, {
-                          telegramID: e.target.value,
-                        })
-                      }
-                      placeholder="Телеграм ID"
-                    />
-                  </td>
-                  <td>
-                    <select
-                      value={role}
-                      onChange={(e) =>
-                        handleUpdate(id, {
-                          role: e.target.value,
-                        })
-                      }
+        <div className={styles.cards}>
+          {users.map((user) => {
+            const draft = drafts[user.id] || toDraft(user);
+            const patch = patches[user.id];
+            const error = rowErrors[user.id];
+            const isSelf = Number(currentUser?.id) === Number(user.id);
+            const cardClass = [
+              styles.card,
+              patch ? styles.cardDirty : '',
+              error ? styles.cardError : '',
+              !draft.isActive ? styles.cardInactive : '',
+            ].join(' ');
+
+            return (
+              <div key={user.id} className={cardClass}>
+                <div className={styles.cardHead}>
+                  <span className={styles.cardName}>
+                    #{user.id} {user.username}
+                  </span>
+                  <div className={styles.badges}>
+                    {isSelf && (
+                      <span className={`${styles.badge} ${styles.badgeAccent}`}>
+                        это вы
+                      </span>
+                    )}
+                    {patch && (
+                      <span className={`${styles.badge} ${styles.badgeWarn}`}>
+                        изменён
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <label className={fieldClass(patch, 'username')}>
+                  Имя
+                  <input
+                    className={styles.input}
+                    value={draft.username}
+                    onChange={(e) =>
+                      updateDraft(user, 'username', e.target.value)
+                    }
+                  />
+                </label>
+                <label className={fieldClass(patch, 'email')}>
+                  Email (через запятую: Google, Яндекс)
+                  <input
+                    className={styles.input}
+                    inputMode="email"
+                    value={draft.emailText}
+                    onChange={(e) =>
+                      updateDraft(user, 'emailText', e.target.value)
+                    }
+                  />
+                </label>
+                <label className={fieldClass(patch, 'telegramID')}>
+                  Telegram ID
+                  <input
+                    className={styles.input}
+                    inputMode="numeric"
+                    value={draft.telegramID}
+                    onChange={(e) =>
+                      updateDraft(user, 'telegramID', e.target.value)
+                    }
+                  />
+                </label>
+                <label className={fieldClass(patch, 'role')}>
+                  Роль
+                  <select
+                    className={styles.select}
+                    value={draft.role}
+                    disabled={isSelf}
+                    onChange={(e) => updateDraft(user, 'role', e.target.value)}
+                  >
+                    <option value="user">user</option>
+                    <option value="admin">admin</option>
+                  </select>
+                </label>
+                <label className={fieldClass(patch, 'is_active')}>
+                  Доступ
+                  <select
+                    className={styles.select}
+                    value={draft.isActive ? 'on' : 'off'}
+                    disabled={isSelf}
+                    onChange={(e) =>
+                      updateDraft(user, 'isActive', e.target.value === 'on')
+                    }
+                  >
+                    <option value="on">может входить</option>
+                    <option value="off">отключён</option>
+                  </select>
+                </label>
+
+                {error && <div className={styles.errorText}>{error}</div>}
+
+                {!isSelf && (
+                  <div className={styles.actions}>
+                    <button
+                      type="button"
+                      className={`${styles.button} ${styles.buttonDanger}`}
+                      onClick={() => handleDelete(user)}
                     >
-                      <option value="user">user</option>
-                      <option value="admin">admin</option>
-                    </select>
-                  </td>
-                  <td>
-                    <button onClick={() => handleDelete(id)}>Удалить</button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                      Удалить
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
-      <h2>Добавить пользователя</h2>
-      <div className={styles.formWrap}>
-        <form onSubmit={handleAdd}>
-          <input
-            inputMode="text"
-            name="username"
-            placeholder="Username"
-            value={form.username}
-            onChange={handleChange}
-            // required
-          />
-          <input
-            inputMode="email"
-            name="email"
-            placeholder="Email"
-            value={form.email}
-            onChange={(e) =>
-              setForm((prev) => ({
-                ...prev,
-                email: e.target.value.split(',').map((s) => s.trim()),
-              }))
-            }
-            // required
-          />
-          <input
-            type="tel"
-            inputMode="numeric"
-            pattern="[0-9]*"
-            name="telegramID"
-            placeholder="Телеграм ID"
-            value={form.telegramID}
-            onChange={handleChange}
-            // required
-          />
-          <select name="role" value={form.role} onChange={handleChange}>
-            <option value="user">user</option>
-            <option value="admin">admin</option>
-          </select>
-          <button type="submit">Добавить</button>
+
+      <section className={styles.section}>
+        <h2 className={styles.sectionTitle}>Добавить пользователя</h2>
+        <form className={styles.addForm} onSubmit={handleAdd}>
+          <label className={styles.field}>
+            Имя
+            <input
+              className={styles.input}
+              value={form.username}
+              onChange={(e) =>
+                setForm((prev) => ({ ...prev, username: e.target.value }))
+              }
+            />
+          </label>
+          <label className={styles.field}>
+            Email (через запятую)
+            <input
+              className={styles.input}
+              inputMode="email"
+              value={form.emailText}
+              onChange={(e) =>
+                setForm((prev) => ({ ...prev, emailText: e.target.value }))
+              }
+            />
+          </label>
+          <label className={styles.field}>
+            Telegram ID
+            <input
+              className={styles.input}
+              inputMode="numeric"
+              value={form.telegramID}
+              onChange={(e) =>
+                setForm((prev) => ({ ...prev, telegramID: e.target.value }))
+              }
+            />
+          </label>
+          <label className={styles.field}>
+            Роль
+            <select
+              className={styles.select}
+              value={form.role}
+              onChange={(e) =>
+                setForm((prev) => ({ ...prev, role: e.target.value }))
+              }
+            >
+              <option value="user">user</option>
+              <option value="admin">admin</option>
+            </select>
+          </label>
+          <button
+            type="submit"
+            className={`${styles.button} ${styles.buttonPrimary}`}
+            disabled={adding || !formDirty}
+          >
+            {adding ? 'Добавляем…' : 'Добавить'}
+          </button>
         </form>
-      </div>
+      </section>
     </div>
   );
 }

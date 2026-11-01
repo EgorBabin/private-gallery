@@ -339,6 +339,11 @@ router.get('/previews', async (req, res) => {
             title = await getCardByPath(normalizedPrefix)
                 .then((card) => card?.title || null)
                 .catch(() => null);
+            // только открытие папки, без каждого листания: журнал и статистика
+            logAction(req, 'Открыл папку', normalizedPrefix, {
+                notify: false,
+                meta: { folder: normalizedPrefix },
+            });
         }
 
         res.json({
@@ -363,35 +368,93 @@ router.get('/previews', async (req, res) => {
     }
 });
 
+/**
+ * key вида year/category/1.jpg, preview/... или original_photo/...
+ * @returns {{baseNoExt: string, folderPath: string, baseNameOnly: string, isVideo: boolean}|null}
+ */
+function parseMediaKey(rawKey) {
+    const key = String(rawKey || '')
+        .replace(/^\/+/, '')
+        .replace(/\.\./g, '');
+    let relative = key;
+    if (key.startsWith(ORIGINAL_ROOT)) {
+        relative = key.slice(ORIGINAL_ROOT.length);
+    } else if (key.startsWith(PREVIEW_ROOT)) {
+        relative = key.slice(PREVIEW_ROOT.length);
+    }
+
+    relative = relative.replace(/^\/+/, '');
+    if (!RELATIVE_MEDIA_KEY_RE.test(relative)) {
+        return null;
+    }
+
+    const ext = path.posix.extname(relative);
+    const baseNoExt = ext ? relative.slice(0, -ext.length) : relative;
+    const baseNameOnly = path.posix.basename(baseNoExt); // e.g. "video_12345" or "12345"
+    return {
+        baseNoExt,
+        folderPath: path.posix.dirname(baseNoExt), // e.g. "2024/event"
+        baseNameOnly,
+        isVideo: baseNameOnly.startsWith('video_'),
+    };
+}
+
+// GET /api/gallery/download?key=... — скачать оригинал (или лучшее видео).
+// Ссылка на S3 подписывается в момент нажатия, поэтому кнопка HD работает,
+// сколько бы фото ни было открыто (ссылки из /original живут 3 минуты).
+router.get('/download', async (req, res) => {
+    try {
+        const media = parseMediaKey(req.query.key);
+        if (!media) {
+            return res.status(400).json({ error: 'Некорректный key' });
+        }
+
+        const entry = await getMediaEntry(media.folderPath, media.baseNameOnly);
+        let targetKey = null;
+        if (media.isVideo) {
+            const size = VIDEO_SIZES.find((s) => (entry?.v || []).includes(s));
+            const bareBase = media.baseNameOnly.replace(/^video_/, '');
+            targetKey = size
+                ? `video_${size}/${media.folderPath}/${bareBase}.mp4`
+                : null;
+        } else {
+            targetKey = entry?.o || null;
+        }
+        if (!targetKey) {
+            return res.status(404).json({ error: 'Файл не найден' });
+        }
+
+        const url = await getSignedUrlForKey(
+            targetKey,
+            media.isVideo ? VIDEO_URL_TTL_SEC : ORIGINAL_URL_TTL_SEC,
+            { skipHead: true },
+        );
+        logAction(req, 'Открыл оригинал', targetKey, {
+            notify: false,
+            meta: { key: targetKey },
+        });
+        res.set('Cache-Control', 'no-store');
+        return res.redirect(url);
+    } catch (err) {
+        console.error('download error', err);
+        return res.status(500).json({ error: 'Internal error' });
+    }
+});
+
 // GET /api/gallery/original?key=year/category/1.jpg  or key=original/year/..
 // Ссылки строятся по индексу медиа папки (Redis), без запросов к S3.
 router.get('/original', async (req, res) => {
     try {
-        let key = req.query.key;
-        if (!key) {
+        if (!req.query.key) {
             return res.status(400).json({ error: 'key required' });
         }
-
-        key = String(key).replace(/^\/+/, '').replace(/\.\./g, '');
-        let relative = key;
-        if (key.startsWith(ORIGINAL_ROOT)) {
-            relative = key.slice(ORIGINAL_ROOT.length);
-        } else if (key.startsWith(PREVIEW_ROOT)) {
-            relative = key.slice(PREVIEW_ROOT.length);
-        }
-
-        relative = relative.replace(/^\/+/, '');
-        if (!RELATIVE_MEDIA_KEY_RE.test(relative)) {
+        const media = parseMediaKey(req.query.key);
+        if (!media) {
             return res.status(400).json({
                 error: 'Некорректный key. Используйте формат "year/category/file.ext"',
             });
         }
-
-        const ext = path.posix.extname(relative);
-        const baseNoExt = ext ? relative.slice(0, -ext.length) : relative;
-        const folderPath = path.posix.dirname(baseNoExt); // e.g. "2024/event"
-        const baseNameOnly = path.posix.basename(baseNoExt); // e.g. "video_12345" or "12345"
-        const isVideo = baseNameOnly.startsWith('video_');
+        const { baseNoExt, folderPath, baseNameOnly, isVideo } = media;
 
         const entry = await getMediaEntry(folderPath, baseNameOnly);
         const version = entry?.e || '';

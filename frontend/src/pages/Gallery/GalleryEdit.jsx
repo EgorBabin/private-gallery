@@ -20,8 +20,15 @@ import {
 import { sileo } from 'sileo';
 import { useCsrfFetch } from '@/hooks/useCsrfFetch';
 import { useCheckSession } from '@/hooks/useCheckSession';
+import { useUnsavedGuard } from '@/hooks/useUnsavedGuard';
 import { parseApiResponse } from '@/utils/apiResponse';
 import { notify, notifyError, notifyLoading } from '@/utils/notifications';
+import {
+  UPLOAD_ACCEPT,
+  canPreviewInBrowser,
+  fileExtension,
+  isUploadableImage,
+} from '@/utils/imageFormats';
 import styles from './GalleryEdit.module.css';
 
 const CARDS_API = '/api/gallery/cards-admin';
@@ -48,7 +55,9 @@ const REORDER_STAGE_MESSAGES = {
 };
 
 const MAX_UPLOAD_IMAGES = Number(
-  import.meta.env.VITE_MAX_UPLOAD_IMAGES ?? import.meta.env.MAX_UPLOAD_IMAGES ?? 10,
+  import.meta.env.VITE_MAX_UPLOAD_IMAGES ??
+    import.meta.env.MAX_UPLOAD_IMAGES ??
+    10,
 );
 
 function validationError(message) {
@@ -713,6 +722,8 @@ export default function GalleryEdit() {
     () => !arraysEqual(currentOrderKeys, reorderBaseOrder),
     [currentOrderKeys, reorderBaseOrder],
   );
+  // несохранённый порядок фото или выбранные, но не загруженные файлы
+  useUnsavedGuard(reorderDirty || files.length > 0);
 
   const loadGalleryItems = useCallback(async () => {
     if (!canUpload) {
@@ -1029,11 +1040,13 @@ export default function GalleryEdit() {
       return;
     }
 
+    // RAW камер браузер не распознаёт как image/*, поэтому проверка по
+    // расширению (см. utils/imageFormats.js)
     for (const f of files) {
-      if (!f.type || !f.type.startsWith('image/')) {
+      if (!isUploadableImage(f)) {
         notify({
           status: 'warning',
-          message: 'Можно загружать только изображения (превью)',
+          message: `Формат не поддерживается: ${f.name || 'файл'}`,
         });
         return;
       }
@@ -1344,7 +1357,10 @@ export default function GalleryEdit() {
           {files.length > 0 ? (
             <div className={styles.selectedFilesGrid}>
               {files.map((file, index) => (
-                <div className={styles.selectedFileItem} key={`${file.name}-${index}`}>
+                <div
+                  className={styles.selectedFileItem}
+                  key={`${file.name}-${index}`}
+                >
                   <button
                     type="button"
                     className={`${styles.reorderActionButton} ${styles.reorderActionDelete}`}
@@ -1353,11 +1369,22 @@ export default function GalleryEdit() {
                   >
                     <Trash2 size={14} />
                   </button>
-                  <img
-                    src={previewUrls[index]}
-                    alt={file.name || `selected-${index + 1}`}
-                    className={styles.selectedFilePreview}
-                  />
+                  {canPreviewInBrowser(file) ? (
+                    <img
+                      src={previewUrls[index]}
+                      alt={file.name || `selected-${index + 1}`}
+                      className={styles.selectedFilePreview}
+                    />
+                  ) : (
+                    // RAW, HEIC и TIFF браузер не покажет: плашка с форматом,
+                    // превью появится после обработки на сервере
+                    <div
+                      className={styles.selectedFilePlaceholder}
+                      title={file.name}
+                    >
+                      {fileExtension(file).slice(1).toUpperCase() || 'FILE'}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -1376,7 +1403,7 @@ export default function GalleryEdit() {
 
           <input
             type="file"
-            accept="image/*"
+            accept={UPLOAD_ACCEPT}
             multiple
             onChange={(e) => {
               const selected = e.target.files ? Array.from(e.target.files) : [];

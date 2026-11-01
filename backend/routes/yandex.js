@@ -1,7 +1,7 @@
 import express from 'express';
 import crypto from 'crypto';
-import pool from '../db.js';
 import { logAction } from '../utils/logger.js';
+import { findUserByEmail, recordLogin } from '../utils/userLookup.js';
 
 const router = express.Router();
 
@@ -112,12 +112,9 @@ router.get('/callback', async (req, res) => {
         }
         const email = userInfo.default_email.trim().toLowerCase();
 
-        const userQuery = `
-            SELECT * FROM users
-            WHERE $1 = ANY(email)
-            LIMIT 1
-        `;
-        const { rows } = await pool.query(userQuery, [email]);
+        // тот же массив users.email, что и для входа через Google
+        const user = await findUserByEmail(email);
+        const rows = user ? [user] : [];
 
         if (rows.length === 0) {
             logAction(req, '❌ Пользователь не найден', email);
@@ -152,7 +149,8 @@ router.get('/callback', async (req, res) => {
                 req.session.cookie.expires = false;
             }
 
-            logAction(req, '✅ Пользователь авторизовался');
+            recordLogin(rows[0].id, 'yandex');
+            logAction(req, '✅ Пользователь авторизовался через Яндекс');
             res.redirect(process.env.FRONTEND_URL);
             return;
         });

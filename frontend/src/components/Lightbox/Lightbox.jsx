@@ -41,11 +41,18 @@ function gatherVideoUrls(meta) {
   })).filter((v) => v.url);
 }
 
+// Кнопка HD ведёт на бэкенд, который подписывает ссылку на S3 в момент
+// нажатия: прямые ссылки из метаданных живут 3 минуты и протухали, если
+// фото было открыто дольше. Метаданные нужны только чтобы знать, есть ли файл.
 function getDownloadHref(item, meta) {
   if (!meta) return null;
-  if (meta.isVideo || item.isVideo)
-    return gatherVideoUrls(meta)[0]?.url || null;
-  return urlOf(meta.original ?? meta.original_photo ?? meta.orig);
+  const available =
+    meta.isVideo || item.isVideo
+      ? gatherVideoUrls(meta).length > 0
+      : Boolean(urlOf(meta.original ?? meta.original_photo ?? meta.orig));
+  return available
+    ? `/api/gallery/download?key=${encodeURIComponent(item.key)}`
+    : null;
 }
 
 const LightboxSlide = memo(function LightboxSlide({ item, meta }) {

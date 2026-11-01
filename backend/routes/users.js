@@ -5,7 +5,10 @@ import { sendError, sendSuccess } from '../utils/apiResponse.js';
 
 const router = express.Router();
 
-const EMAIL_RE = /^[a-zA-Z0-9._-]+@(yandex\.ru|gmail\.com)$/;
+// Любой адрес: вход через Google работает и для доменов Google Workspace,
+// а у Яндекса есть @ya.ru, @yandex.com и почта для домена
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const EMAIL_MAX_LENGTH = 254;
 const TELEGRAM_ID_RE = /^\d{4,20}$/;
 const USERNAME_RE = /^[a-zA-Zа-яА-ЯёЁ_-]{3,64}$/;
 const ALLOWED_ROLES = new Set(['user', 'admin']);
@@ -83,10 +86,8 @@ function normalizeEmailArray(value, { required = false } = {}) {
 
     const unique = [...new Set(emails)];
     for (const email of unique) {
-        if (!EMAIL_RE.test(email)) {
-            throw new ValidationError(
-                'Email должен быть с доменом @yandex.ru или @gmail.com',
-            );
+        if (email.length > EMAIL_MAX_LENGTH || !EMAIL_RE.test(email)) {
+            throw new ValidationError(`Некорректный email: ${email}`);
         }
     }
 
@@ -216,9 +217,16 @@ router.post('/', async (req, res) => {
     }
 });
 
+function isSelf(req, id) {
+    return Number(req.session?.user?.id) === id;
+}
+
 router.delete('/:id', async (req, res) => {
     try {
         const id = parseUserId(req.params.id);
+        if (isSelf(req, id)) {
+            throw new ValidationError('Нельзя удалить самого себя');
+        }
         const { rowCount } = await pool.query(
             'DELETE FROM users WHERE id = $1',
             [id],
@@ -288,6 +296,26 @@ router.put('/:id', async (req, res) => {
             patch.role = role;
         }
 
+        if (body.is_active !== undefined) {
+            if (typeof body.is_active !== 'boolean') {
+                throw new ValidationError(
+                    'is_active должен быть true или false',
+                );
+            }
+            patch.is_active = body.is_active;
+        }
+
+        // защита от случайной блокировки собственного доступа к админке
+        if (
+            isSelf(req, id) &&
+            (patch.is_active === false ||
+                (patch.role !== undefined && patch.role !== 'admin'))
+        ) {
+            throw new ValidationError(
+                'Нельзя отключить себя или снять с себя роль admin',
+            );
+        }
+
         if (Object.keys(patch).length === 0) {
             return sendError(res, {
                 httpStatus: 400,
@@ -330,7 +358,12 @@ router.put('/:id', async (req, res) => {
             message: 'Пользователь обновлён',
             payload: { user: normalizeUser(rows[0]) },
         });
-        logAction(req, 'Пользователь обновлён', '#users.js');
+        logAction(
+            req,
+            'Пользователь обновлён',
+            `${rows[0].username} (id ${id}): ${Object.keys(patch).join(', ')}`,
+            { meta: { targetUserId: id, fields: Object.keys(patch) } },
+        );
     } catch (err) {
         if (err?.code === '23505') {
             return sendError(res, {

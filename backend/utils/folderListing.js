@@ -7,6 +7,7 @@ import {
     setMediaIndex,
     clearMediaIndex,
 } from './s3Cache.js';
+import { ORIGINAL_IMAGE_EXTENSIONS } from './sourceDecoder.js';
 
 // Единая точка чтения содержимого папок: preview-листинг и индекс
 // существующих оригиналов/размеров/видео. Всё кэшируется в Redis и
@@ -16,16 +17,8 @@ export const PREVIEW_ROOT = 'preview/';
 export const ORIGINAL_ROOT = 'original_photo/';
 export const SCREEN_SIZES = [1280, 1920, 2560];
 export const VIDEO_SIZES = [1440, 1080, 720];
-const ORIGINAL_EXTENSIONS = [
-    '.jpg',
-    '.jpeg',
-    '.png',
-    '.webp',
-    '.avif',
-    '.gif',
-    '.tif',
-    '.tiff',
-];
+// порядок = приоритет, если у одного медиа нашлось несколько оригиналов
+const ORIGINAL_EXTENSIONS = ORIGINAL_IMAGE_EXTENSIONS;
 
 const mediaIndexBuilds = new Map();
 

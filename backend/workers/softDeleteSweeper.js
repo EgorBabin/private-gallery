@@ -2,13 +2,14 @@ import path from 'path';
 import { deleteFromS3, listObjects } from '../utils/s3Client.js';
 import { syncCardByPath } from '../utils/galleryCardSync.js';
 import { parseSoftDeleteBase } from '../utils/deletionMarker.js';
+// общий список форматов: иначе оригиналы HEIC/RAW не удалялись бы
+import { MEDIA_FILE_RE } from '../utils/sourceDecoder.js';
 
 const PREVIEW_ROOT = 'preview/';
 const ORIGINAL_ROOT = 'original_photo/';
 const SCREEN_DIRS = ['screen-1280', 'screen-1920', 'screen-2560'];
 const VIDEO_DIRS = ['video_1440', 'video_1080', 'video_720'];
 const CARD_PATH_RE = /^\d{1,4}\/[A-Za-z]+$/;
-const MEDIA_FILE_RE = /\.(jpe?g|png|webp|avif|gif|mp4|tiff?)$/i;
 
 const SWEEP_INTERVAL_DEFAULT_MS = 1000 * 60 * 60;
 const rawSweepIntervalMs = Number(

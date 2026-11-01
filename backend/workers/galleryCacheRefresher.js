@@ -60,29 +60,39 @@ export function startGalleryCacheRefresher() {
     let running = false;
 
     async function runOnce() {
-        if (running) return;
+        if (running) {
+            return;
+        }
         running = true;
         let backfillBudget = DIMENSIONS_BACKFILL_PER_RUN;
         try {
             // list year-level prefixes under preview/
             const years = await listPrefixes(PREVIEW_ROOT);
             for (const yearPrefix of years || []) {
-                if (stopped) return;
+                if (stopped) {
+                    return;
+                }
                 // yearPrefix like 'preview/2024/'
                 const year = String(yearPrefix || '').replace(
                     /^preview\/+|\/+$/g,
                     '',
                 );
-                if (!year) continue;
+                if (!year) {
+                    continue;
+                }
                 const categories = await listPrefixes(
                     `${PREVIEW_ROOT}${year}/`,
                 );
                 for (const catPrefix of categories || []) {
-                    if (stopped) return;
+                    if (stopped) {
+                        return;
+                    }
                     const rel = String(catPrefix || '')
                         .replace(/^preview\/+/, '')
                         .replace(/\/+$/, '');
-                    if (!rel) continue;
+                    if (!rel) {
+                        continue;
+                    }
 
                     const discovered = await listFolderPreviewsFromS3(rel);
                     await setPreviewCache(rel, discovered);
@@ -111,7 +121,9 @@ export function startGalleryCacheRefresher() {
     async function start() {
         // run immediately
         await runOnce();
-        if (stopped) return;
+        if (stopped) {
+            return;
+        }
         timer = setInterval(() => void runOnce(), DEFAULT_INTERVAL_MS);
     }
 
@@ -121,7 +133,9 @@ export function startGalleryCacheRefresher() {
 
     return async function stop() {
         stopped = true;
-        if (timer) clearInterval(timer);
+        if (timer) {
+            clearInterval(timer);
+        }
     };
 }
 
